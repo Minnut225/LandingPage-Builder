@@ -50,7 +50,26 @@ BASE_URL=
 
 ---
 
-## Run
+## Run (Web Studio - Multi-User UI)
+
+Chạy giao diện Web Studio trực quan (Split-Screen Studio phong cách v0/Bolt, tone màu trắng - xám thanh lịch, hỗ trợ nhiều người dùng đồng thời qua trình duyệt):
+
+```powershell
+python run_web.py
+```
+
+Trình duyệt sẽ tự động mở tại `http://localhost:8000`. Tại đây bạn có thể:
+- Nhập prompt yêu cầu tạo trang và theo dõi tiến trình thực thi thời gian thực (SSE).
+- Xem Live Preview responsive tức thì với các chế độ Desktop, Tablet, Mobile.
+- Xem báo cáo QA checklist chi tiết cho từng tiêu chí kiểm thử.
+- Gửi phản hồi chỉnh sửa (Revision), duyệt (Approve) hoặc Rollback mượt mà.
+- Tải source code trọn gói dạng file `.zip`.
+
+Mọi dự án tạo mới đều được cô lập độc lập tại `output/projects/{project_id}/`, hoàn toàn không gây ghi đè hay xung đột khi nhiều người cùng sử dụng.
+
+---
+
+## Run (CLI - Giao diện dòng lệnh)
 
 ```powershell
 python main.py
