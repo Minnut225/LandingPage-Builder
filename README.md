@@ -58,6 +58,20 @@ Chạy giao diện Web Studio trực quan (Split-Screen Studio phong cách v0/Bo
 python run_web.py
 ```
 
+### Chạy chia sẻ trong mạng nội bộ (Host cho mạng LAN):
+
+Để các máy tính, điện thoại, tablet khác trong cùng mạng Wi-Fi/LAN có thể truy cập:
+
+```powershell
+python run_web.py --lan
+```
+
+Hệ thống sẽ hiển thị địa chỉ IP mạng nội bộ của bạn, ví dụ:
+```text
+➜ Local:   http://localhost:8000
+➜ Network: http://192.168.1.6:8000  (Chia sẻ link này cho các thiết bị khác trong mạng LAN)
+```
+
 Trình duyệt sẽ tự động mở tại `http://localhost:8000`. Tại đây bạn có thể:
 - Nhập prompt yêu cầu tạo trang và theo dõi tiến trình thực thi thời gian thực (SSE).
 - Xem Live Preview responsive tức thì với các chế độ Desktop, Tablet, Mobile.
