@@ -60,6 +60,10 @@ jobs:
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v5
 
+      - name: Inject Environment Config for GitHub Pages
+        run: |
+          echo "window.ENV_CONFIG = { BACKEND_URL: '${{ vars.BACKEND_URL }}' };" > web/static/config.js
+
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
         with:

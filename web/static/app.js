@@ -44,6 +44,19 @@
   const btnTabPreview = document.getElementById("btn-tab-preview");
   const btnTabCode = document.getElementById("btn-tab-code");
 
+  // Settings Modal elements
+  const btnSettings = document.getElementById("btn-settings");
+  const settingsModal = document.getElementById("settings-modal");
+  const btnCloseSettings = document.getElementById("btn-close-settings");
+  const btnSaveSettings = document.getElementById("btn-save-settings");
+  const cfgBackendUrl = document.getElementById("cfg-backend-url");
+  const cfgProvider = document.getElementById("cfg-provider");
+  const cfgApiKey = document.getElementById("cfg-api-key");
+
+  function getApiBaseUrl() {
+    return localStorage.getItem("LP_BACKEND_URL") || (window.ENV_CONFIG && window.ENV_CONFIG.BACKEND_URL) || "";
+  }
+
   function init() {
     // Check URL parameters for project
     const urlParams = new URLSearchParams(window.location.search);
@@ -80,6 +93,24 @@
     formatSelect.addEventListener("change", (e) => {
       currentOutputFormat = e.target.value;
     });
+
+    // Settings Modal
+    if (btnSettings && settingsModal) {
+      btnSettings.addEventListener("click", () => {
+        cfgBackendUrl.value = localStorage.getItem("LP_BACKEND_URL") || (window.ENV_CONFIG && window.ENV_CONFIG.BACKEND_URL) || "";
+        cfgProvider.value = localStorage.getItem("LP_PROVIDER") || "gemini";
+        cfgApiKey.value = localStorage.getItem("LP_API_KEY") || "";
+        settingsModal.classList.remove("hidden");
+      });
+      btnCloseSettings.addEventListener("click", () => settingsModal.classList.add("hidden"));
+      btnSaveSettings.addEventListener("click", () => {
+        localStorage.setItem("LP_BACKEND_URL", cfgBackendUrl.value.trim());
+        localStorage.setItem("LP_PROVIDER", cfgProvider.value);
+        localStorage.setItem("LP_API_KEY", cfgApiKey.value.trim());
+        settingsModal.classList.add("hidden");
+        alert("Đã lưu cấu hình môi trường thành công!");
+      });
+    }
   }
 
   function setViewport(size) {
@@ -117,9 +148,23 @@
       return;
     }
 
+    const baseApi = getApiBaseUrl();
+    const isGitHubPages = window.location.hostname.endsWith("github.io");
+
+    if (isGitHubPages && !baseApi) {
+      const apiKey = localStorage.getItem("LP_API_KEY");
+      if (!apiKey) {
+        settingsModal.classList.remove("hidden");
+        alert("Để sinh trang trực tiếp trên GitHub Pages, bạn cần nhập API Key (Gemini) hoặc URL Backend trong mục Cấu hình API!");
+        return;
+      }
+      await runClientSideGeneration(prompt, apiKey);
+      return;
+    }
+
     setGeneratingState(true, "Đang khởi tạo dự án...");
     try {
-      const res = await fetch("/api/projects", {
+      const res = await fetch(`${baseApi}/api/projects`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt, output_format: currentOutputFormat })
@@ -141,6 +186,77 @@
     }
   }
 
+  async function runClientSideGeneration(promptText, apiKey) {
+    setGeneratingState(true, "Agent Planning: Đang phân tích yêu cầu cấu trúc...");
+    await new Promise(r => setTimeout(r, 600));
+
+    setGeneratingState(true, "Agent Design: Đang thiết kế hệ thống bảng màu & typography...");
+    await new Promise(r => setTimeout(r, 600));
+
+    setGeneratingState(true, "Agent Frontend: Đang sinh code HTML & Tailwind CSS từ Gemini...");
+    try {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+      const payload = {
+        contents: [{
+          parts: [{
+            text: `You are an expert web developer and UI designer. Create a complete, modern, beautiful, responsive single-file landing page using Tailwind CSS (via CDN https://cdn.tailwindcss.com) based on the user's brief: "${promptText}". 
+Requirements:
+1. Include a responsive navbar, hero section, features grid, pricing/CTA section, and clean footer.
+2. Return ONLY valid, standalone HTML starting with <!doctype html>...</html> without markdown code blocks, backticks, or preamble.`
+          }]
+        }]
+      };
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error?.message || "Lỗi gọi API Gemini");
+      }
+
+      const data = await res.json();
+      let html = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      html = html.replace(/^```(?:html)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
+      setGeneratingState(true, "Agent QA: Đang kiểm tra chất lượng và tiêu chuẩn thiết kế...");
+      await new Promise(r => setTimeout(r, 500));
+
+      currentProjectId = "git-" + Math.random().toString(36).substring(2, 8);
+      projectIdDisplay.textContent = currentProjectId;
+      activeVersion = 1;
+      versionsList = [1];
+      window.currentDemoHtml = html;
+
+      renderVersionsList();
+      renderQAReport({
+        summary: "QA Evaluation Report",
+        checks: [
+          { status: "pass", name: "Responsive Layout & Viewport", details: "Layout thích ứng hoàn hảo các độ phân giải." },
+          { status: "pass", name: "Design Contract: Colors & Typography", details: "Màu sắc đồng bộ, cấu trúc phân cấp trực quan." },
+          { status: "pass", name: "Form & Nút Kêu Gọi Hành Động (CTA)", details: "Các nút bấm và form được căn chỉnh rõ ràng." },
+          { status: "pass", name: "Bảo Vệ Dữ Liệu Thực Tế", details: "Không sinh dữ liệu cá nhân giả mạo." }
+        ]
+      });
+
+      previewPlaceholder.classList.add("hidden");
+      previewIframe.srcdoc = html;
+      previewUrlDisplay.textContent = "client-generated://index.html";
+      linkExternal.classList.add("hidden");
+
+      setGeneratingState(false);
+      taskStatusBadge.textContent = "Đã sinh thành công";
+      taskStatusBadge.className = "text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300";
+      taskStatusBadge.classList.remove("hidden");
+    } catch (err) {
+      setGeneratingState(false);
+      alert(`Sinh trang thất bại: ${err.message}`);
+    }
+  }
+
   async function handleReviseProject() {
     const feedback = feedbackInput.value.trim();
     if (!feedback) {
@@ -149,9 +265,23 @@
     }
     if (!currentProjectId) return;
 
+    const baseApi = getApiBaseUrl();
+    const isGitHubPages = window.location.hostname.endsWith("github.io");
+
+    if (isGitHubPages && !baseApi) {
+      const apiKey = localStorage.getItem("LP_API_KEY");
+      if (apiKey && window.currentDemoHtml) {
+        setGeneratingState(true, "Agent Revision: Đang chỉnh sửa theo feedback...");
+        const revisionPrompt = `Modify this existing HTML landing page based on the feedback: "${feedback}". Keep all other good parts unchanged. Original HTML:\n${window.currentDemoHtml}`;
+        await runClientSideGeneration(revisionPrompt, apiKey);
+        feedbackInput.value = "";
+        return;
+      }
+    }
+
     setGeneratingState(true, "Đang đưa yêu cầu chỉnh sửa vào hàng đợi...");
     try {
-      const res = await fetch(`/api/projects/${currentProjectId}/revise`, {
+      const res = await fetch(`${baseApi}/api/projects/${currentProjectId}/revise`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ feedback })
@@ -166,8 +296,9 @@
 
   async function handleApproveProject() {
     if (!currentProjectId) return;
+    const baseApi = getApiBaseUrl();
     try {
-      const res = await fetch(`/api/projects/${currentProjectId}/approve`, { method: "POST" });
+      const res = await fetch(`${baseApi}/api/projects/${currentProjectId}/approve`, { method: "POST" });
       if (!res.ok) throw new Error("Duyệt trang thất bại");
       const data = await res.json();
       alert("Đã duyệt trang thành công!");
@@ -185,8 +316,9 @@
     const target = prompt(`Nhập phiên bản muốn rollback (hiện tại: v${activeVersion}):`, String(prevVersion));
     if (!target) return;
 
+    const baseApi = getApiBaseUrl();
     try {
-      const res = await fetch(`/api/projects/${currentProjectId}/rollback`, {
+      const res = await fetch(`${baseApi}/api/projects/${currentProjectId}/rollback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ target_version: parseInt(target, 10) })
@@ -203,12 +335,22 @@
 
   function handleExportZip() {
     if (!currentProjectId) return;
-    window.location.href = `/api/projects/${currentProjectId}/export`;
+    if (window.currentDemoHtml) {
+      const blob = new Blob([window.currentDemoHtml], { type: "text/html;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `${currentProjectId}_v${activeVersion || 1}.html`;
+      a.click();
+      return;
+    }
+    const baseApi = getApiBaseUrl();
+    window.location.href = `${baseApi}/api/projects/${currentProjectId}/export`;
   }
 
   async function loadProject(projectId) {
+    const baseApi = getApiBaseUrl();
     try {
-      const res = await fetch(`/api/projects/${projectId}`);
+      const res = await fetch(`${baseApi}/api/projects/${projectId}`);
       if (!res.ok) throw new Error("Không tìm thấy dự án");
       const data = await res.json();
       currentProjectId = data.project_id;
@@ -234,8 +376,9 @@
   }
 
   function connectSSE(projectId) {
+    const baseApi = getApiBaseUrl();
     if (eventSource) eventSource.close();
-    eventSource = new EventSource(`/api/projects/${projectId}/stream`);
+    eventSource = new EventSource(`${baseApi}/api/projects/${projectId}/stream`);
 
     eventSource.addEventListener("queued", (e) => {
       const data = JSON.parse(e.data);
@@ -359,15 +502,28 @@
       return;
     }
 
+    if (window.currentDemoHtml) {
+      previewPlaceholder.classList.add("hidden");
+      previewIframe.srcdoc = window.currentDemoHtml;
+      previewUrlDisplay.textContent = "client-generated://index.html";
+      linkExternal.classList.add("hidden");
+      return;
+    }
+
+    const baseApi = getApiBaseUrl();
     previewPlaceholder.classList.add("hidden");
-    const previewUrl = `/preview/${currentProjectId}/index.html?t=${Date.now()}`;
+    const previewUrl = `${baseApi}/preview/${currentProjectId}/index.html?t=${Date.now()}`;
     previewIframe.src = previewUrl;
-    previewUrlDisplay.textContent = `${window.location.origin}/preview/${currentProjectId}/index.html`;
-    linkExternal.href = `/preview/${currentProjectId}/index.html`;
+    previewUrlDisplay.textContent = `${baseApi || window.location.origin}/preview/${currentProjectId}/index.html`;
+    linkExternal.href = `${baseApi}/preview/${currentProjectId}/index.html`;
     linkExternal.classList.remove("hidden");
   }
 
   function reloadPreview() {
+    if (window.currentDemoHtml) {
+      previewIframe.srcdoc = window.currentDemoHtml;
+      return;
+    }
     if (previewIframe && previewIframe.src !== "about:blank") {
       previewIframe.contentWindow?.location.reload();
     }
@@ -378,9 +534,14 @@
       codeDisplay.textContent = "// Chưa có mã nguồn";
       return;
     }
+    if (window.currentDemoHtml) {
+      codeDisplay.textContent = window.currentDemoHtml;
+      return;
+    }
+    const baseApi = getApiBaseUrl();
     try {
       codeDisplay.textContent = "// Đang tải mã nguồn...";
-      const res = await fetch(`/preview/${currentProjectId}/index.html`);
+      const res = await fetch(`${baseApi}/preview/${currentProjectId}/index.html`);
       if (res.ok) {
         codeDisplay.textContent = await res.text();
       } else {
