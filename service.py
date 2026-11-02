@@ -10,7 +10,7 @@ import urllib.request
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 OutputFormat = Literal["html_css", "react_ts"]
 CheckStatus = Literal["pass", "fail", "not_run"]
@@ -403,7 +403,12 @@ class LandingPageService:
         except Exception:
             return None
 
-    def create_project(self, brief: str, output_format: OutputFormat = "html_css") -> VersionResult:
+    def create_project(
+        self,
+        brief: str,
+        output_format: OutputFormat = "html_css",
+        progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> VersionResult:
         import crew_builder
 
         manifest = self.wm.init_manifest(brief, output_format)
@@ -411,21 +416,29 @@ class LandingPageService:
         # 1. Planning stage
         manifest["state"] = "planning"
         self.wm.save_manifest(manifest)
+        if progress_callback:
+            progress_callback("planning", {"brief": brief, "output_format": output_format})
         page_spec = crew_builder.run_planning_stage(brief, output_format)
 
         # 2. Design stage
         manifest["state"] = "designing"
         self.wm.save_manifest(manifest)
+        if progress_callback:
+            progress_callback("designing", {"page_spec": page_spec})
         design_spec = crew_builder.run_design_stage(page_spec, output_format)
 
         # 3. Frontend stage
         manifest["state"] = "implementing"
         self.wm.save_manifest(manifest)
+        if progress_callback:
+            progress_callback("generating", {"design_spec": design_spec})
         code = crew_builder.run_frontend_stage(page_spec, design_spec, output_format)
 
         # 4. QA stage
         manifest["state"] = "qa"
         self.wm.save_manifest(manifest)
+        if progress_callback:
+            progress_callback("qa_review", {"code_chars": len(code)})
         qa_report = crew_builder.run_qa_stage(code, page_spec, design_spec, output_format)
 
         # Strict QA gate with 1 auto-repair attempt
@@ -458,6 +471,8 @@ class LandingPageService:
             manifest = self.wm.get_manifest()
             manifest["state"] = "awaiting_user_review"
             self.wm.save_manifest(manifest)
+            if progress_callback:
+                progress_callback("completed", {"version_num": 1, "qa_report": qa_report})
             return VersionResult(version_num=1, status="awaiting_user_review", preview_path=preview_path, qa_report=qa_report)
         else:
             self.wm.save_version_artifacts(
@@ -473,7 +488,12 @@ class LandingPageService:
             self.wm.save_manifest(manifest)
             return VersionResult(version_num=1, status="qa_failed", preview_path=None, qa_report=qa_report, error="QA checks failed.")
 
-    def revise_project(self, feedback: str, target_section: str | None = None) -> VersionResult:
+    def revise_project(
+        self,
+        feedback: str,
+        target_section: str | None = None,
+        progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> VersionResult:
         import crew_builder
 
         manifest = self.wm.get_manifest()
@@ -498,6 +518,8 @@ class LandingPageService:
         # 1. Revision planning stage
         manifest["state"] = "revising"
         self.wm.save_manifest(manifest)
+        if progress_callback:
+            progress_callback("revising", {"feedback": feedback, "target_version": next_version})
         revision_request = crew_builder.run_revision_plan_stage(
             current_specs={"page_spec": current_page_spec, "design_spec": current_design_spec},
             current_code=current_code,
@@ -509,11 +531,15 @@ class LandingPageService:
         # 2. Frontend revision execution
         manifest["state"] = "implementing"
         self.wm.save_manifest(manifest)
+        if progress_callback:
+            progress_callback("generating", {"revision_request": revision_request})
         new_code = crew_builder.run_frontend_revision_stage(current_code, revision_request, output_format)
 
         # 3. QA stage
         manifest["state"] = "qa"
         self.wm.save_manifest(manifest)
+        if progress_callback:
+            progress_callback("qa_review", {"version_num": next_version})
         qa_report = crew_builder.run_qa_stage(new_code, current_page_spec, current_design_spec, output_format)
 
         # Strict QA gate with 1 auto-repair attempt
@@ -547,6 +573,8 @@ class LandingPageService:
             manifest = self.wm.get_manifest()
             manifest["state"] = "awaiting_user_review"
             self.wm.save_manifest(manifest)
+            if progress_callback:
+                progress_callback("completed", {"version_num": next_version, "qa_report": qa_report})
             return VersionResult(version_num=next_version, status="awaiting_user_review", preview_path=preview_path, qa_report=qa_report)
         else:
             self.wm.save_version_artifacts(
