@@ -364,6 +364,10 @@ class WorkspaceManager:
         self.save_manifest(manifest)
         return dest_code
 
+    def update_active_preview(self, version_num: int) -> Path:
+        """Alias for promote_preview."""
+        return self.promote_preview(version_num)
+
 
 def get_project_workspace(project_id: str, base_dir: Path | None = None) -> WorkspaceManager:
     """Retrieve or initialize an isolated workspace directory for a given project_id."""
