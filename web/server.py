@@ -15,6 +15,7 @@ from typing import Any, AsyncIterator
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from service import LandingPageService, WorkspaceManager, get_project_workspace
@@ -268,5 +269,8 @@ def create_app(base_dir: Path | None = None) -> FastAPI:
 
         mime_type, _ = mimetypes.guess_type(str(target_file))
         return FileResponse(target_file, media_type=mime_type or "text/plain")
+
+    if STATIC_DIR.exists():
+        app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
     return app
