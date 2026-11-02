@@ -48,8 +48,12 @@
     // Check URL parameters for project
     const urlParams = new URLSearchParams(window.location.search);
     const pid = urlParams.get("project");
+    const isGitHubPages = window.location.hostname.endsWith("github.io");
+
     if (pid) {
       loadProject(pid);
+    } else if (isGitHubPages) {
+      loadDemoShowcase();
     }
 
     // Input listeners
@@ -390,7 +394,43 @@
   function selectVersion(v) {
     activeVersion = v;
     renderVersionsList();
-    updatePreviewFrame();
+    if (window.location.hostname.endsWith("github.io")) {
+      previewPlaceholder.classList.add("hidden");
+      previewIframe.src = "demo_preview.html";
+      previewUrlDisplay.textContent = "demo_preview.html";
+    } else {
+      updatePreviewFrame();
+    }
+  }
+
+  function loadDemoShowcase() {
+    currentProjectId = "demo-showcase";
+    projectIdDisplay.textContent = "demo-showcase";
+    promptInput.value = "Landing page bán khóa học Vibe Coding cho lập trình viên, phong cách tối giản, tone xanh dương công nghệ, có bảng giá và form đăng ký.";
+    promptCharCount.textContent = `${promptInput.value.length} ký tự`;
+    activeVersion = 1;
+    versionsList = [1, 2];
+
+    taskStatusBadge.textContent = "GitHub Pages Demo";
+    taskStatusBadge.className = "text-xs px-2.5 py-1 rounded-full font-semibold bg-blue-50 text-blue-700 border border-blue-200";
+    taskStatusBadge.classList.remove("hidden");
+
+    renderVersionsList();
+    renderQAReport({
+      summary: "QA Evaluation Report",
+      checks: [
+        { status: "pass", name: "Responsive Layout & Viewport", details: "Desktop/Tablet/Mobile viewports render cleanly." },
+        { status: "pass", name: "Design Contract Colors & Typography", details: "Matches tone and minimalism specs." },
+        { status: "pass", name: "CTA Form & Buttons", details: "All buttons clearly labeled and positioned." },
+        { status: "pass", name: "No Fake PII / Verified Placeholders", details: "Verified clean of fabricated identities." }
+      ]
+    });
+
+    previewPlaceholder.classList.add("hidden");
+    previewIframe.src = "demo_preview.html";
+    previewUrlDisplay.textContent = "demo_preview.html";
+    linkExternal.href = "demo_preview.html";
+    linkExternal.classList.remove("hidden");
   }
 
   // Run on load
