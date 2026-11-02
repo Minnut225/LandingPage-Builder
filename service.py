@@ -195,6 +195,27 @@ class WorkspaceManager:
 
         return v_dir
 
+    def save_version(
+        self,
+        version_num: int,
+        page_spec: dict[str, Any] | None,
+        design_spec: dict[str, Any] | None,
+        qa_report: dict[str, Any],
+        code: str,
+        code_filename: str = "index.html",
+        metadata: dict[str, Any] | None = None,
+        revision_request: dict[str, Any] | None = None,
+    ) -> Path:
+        return self.save_version_artifacts(
+            version_num=version_num,
+            page_spec=page_spec,
+            design_spec=design_spec,
+            code=code,
+            qa_report=qa_report,
+            metadata=metadata or {"created_at": datetime.now().isoformat()},
+            revision_request=revision_request,
+        )
+
     def scaffold_react_project(self, target_dir: Path) -> None:
         """Idempotently generates standard Vite + Tailwind configuration files."""
         src_dir = target_dir / "src"
@@ -342,6 +363,17 @@ class WorkspaceManager:
         manifest["active_version"] = version_num
         self.save_manifest(manifest)
         return dest_code
+
+
+def get_project_workspace(project_id: str, base_dir: Path | None = None) -> WorkspaceManager:
+    """Retrieve or initialize an isolated workspace directory for a given project_id."""
+    clean_id = str(project_id).strip()
+    if not re.match(r"^[a-zA-Z0-9_-]+$", clean_id):
+        raise ValueError(f"Invalid project_id: '{project_id}'. Must be alphanumeric, underscores, or hyphens.")
+
+    base = Path(base_dir) if base_dir else (Path(__file__).resolve().parent / "output" / "projects")
+    project_dir = base / clean_id
+    return WorkspaceManager(project_dir)
 
 
 class LandingPageService:
