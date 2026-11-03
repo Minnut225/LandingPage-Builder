@@ -25,14 +25,14 @@
 - **Tùy biến Thiết kế & Bảng màu:**
   - 4 phong cách thiết kế: *Modern Clean*, *Tech Dark Mode*, *Playful Creative*, *Corporate Elegant*.
   - 4 bảng màu chuẩn (*Tech Blue*, *Emerald Green*, *Purple AI*, *Warm Amber*) + Color Picker cho phép nhập mã màu riêng.
-- **Backend Schema & API:**
+- **Backend Schema & API làm nguồn chân lý duy nhất (Single Source of Truth):**
   - Endpoint `GET /api/templates`: Cung cấp danh sách archetype, field schema, style presets, color palettes.
   - Endpoint `POST /api/prompt/preview`: Xem trước prompt được biên dịch từ form trước khi submit.
   - Endpoint `POST /api/projects`: Hỗ trợ nhận payload cấu trúc (`template_id`, `form_data`, `style`, `color_palette`, `output_format`) hoặc fallback chuỗi `prompt` để duy trì backward compatibility.
   - Python module `prompt_synthesizer.py`: Biên dịch form data thành prompt Markdown chuẩn Design Contract.
-- **Tương thích GitHub Pages (Client-side Fallback):** Nhúng schema mặc định vào frontend JS để khi người dùng chạy trực tiếp trên GitHub Pages không có backend vẫn có thể render form và tự ghép prompt gọi Gemini API.
 
 ### Non-Goals
+- Không duy trì cơ chế client-side fallback gọi trực tiếp Gemini trên browser; frontend giao tiếp 100% qua Backend API.
 - Không thay đổi kiến trúc nội bộ của 4 Agent (Planner, Designer, Frontend, QA) hay cấu trúc của `page_spec.json`, `design_spec.json`.
 - Không bắt buộc người dùng phải điền form khi thực hiện sửa đổi (Revision) từ v1 sang v2; phần Revision giữ nguyên ô góp ý tự nhiên linh hoạt.
 
@@ -47,12 +47,12 @@
 
 ### Phương án 1: Client-Side Prompt Synthesizer
 - Toàn bộ schema và logic ghép prompt nằm ở file JavaScript client.
-- *Đánh đổi:* Dễ triển khai trên GitHub Pages, nhưng logic nghiệp vụ bị phân tán, backend không kiểm soát được schema.
+- *Đánh đổi:* Phân tán logic nghiệp vụ, backend không kiểm soát được schema. (Bị loại bỏ).
 
 ### Phương án 2: Full-Stack Schema & Backend API Form Endpoint (ĐƯỢC CHỌN)
-- Schema định nghĩa ở backend Python (`form_schemas.py` & `prompt_synthesizer.py`).
+- Schema và logic biên dịch form sang prompt hoàn toàn đặt tại backend Python (`form_schemas.py` & `prompt_synthesizer.py`).
 - Backend cung cấp `GET /api/templates`, `POST /api/prompt/preview` và nhận payload có cấu trúc ở `POST /api/projects`.
-- *Lý do chọn:* Tập trung hóa logic sinh prompt và dữ liệu mẫu ở backend, đảm bảo kiểm soát chặt chẽ schema, chuẩn bị sẵn sàng cho các client khác trong tương lai (CLI, Mobile app), đồng thời duy trì một bản fallback tương ứng ở client JS cho GitHub Pages.
+- *Lý do chọn:* Tập trung hóa toàn bộ logic sinh prompt và dữ liệu mẫu ở backend, đảm bảo kiểm soát chặt chẽ schema, frontend chỉ đóng vai trò render và gửi dữ liệu, loại bỏ hoàn toàn việc duplicate code giữa Python và JavaScript.
 
 ---
 
@@ -75,9 +75,8 @@
 - Giải pháp này giúp giao diện sidebar rộng 440px không bị quá tải, người dùng copy-paste hoặc gõ phím rất nhanh chóng mà không cần thao tác click "Thêm/Xóa dòng" phức tạp.
 
 ### 4.4 Cơ chế xem trước Prompt (Prompt Preview) - *Builder Call*
-- Cung cấp endpoint `POST /api/prompt/preview` nhận form data và trả về prompt text tức thì mà không kích hoạt tạo dự án.
-- Giao diện có nút accordion "Xem trước prompt được tạo (Preview Prompt)" để người dùng xem và kiểm tra câu lệnh tổng hợp trước khi nhấn Tạo.
-- Trên GitHub Pages offline (không có backend), logic tổng hợp prompt được fallback bởi một hàm JS tương ứng trong `app.js`.
+- Cung cấp endpoint `POST /api/prompt/preview` nhận form data và trả về prompt text tức thì từ `prompt_synthesizer.py`.
+- Giao diện có nút accordion "Xem trước prompt được tạo (Preview Prompt)" để người dùng xem và kiểm tra câu lệnh backend sẽ sinh trước khi nhấn Tạo.
 
 ---
 
@@ -98,7 +97,7 @@
      - Gắn chặt chẽ các chỉ dẫn thiết kế (visual style, color tokens, layout, tone).
      - Áp dụng các quy tắc bảo vệ dữ liệu cá nhân theo `AGENTS.md`.
 3. **`web/server.py`:**
-   - `GET /api/templates`: Trả về toàn bộ schema mẫu, presets và danh sách bảng màu.
+   - `GET /api/templates`: Trả về toàn bộ archetype metadata, form fields, style presets, color palettes.
    - `POST /api/prompt/preview`: Trả về `{ "prompt": "..." }`.
    - `POST /api/projects`: Hỗ trợ payload `{ template_id, form_data, style, color_palette, output_format }` HOẶC backward-compatible `{ prompt, output_format }`.
 
@@ -111,8 +110,9 @@
      - `#qa-panel`: QA Checklist Report.
      - `#revision-panel`: Góp ý chỉnh sửa (textarea feedback, nút Tạo bản mới, Duyệt trang).
 2. **`app.js`:**
-   - Tự động fetch `/api/templates` khi khởi chạy (fallback schema tích hợp sẵn nếu chạy trên GitHub Pages).
-   - Dynamic form renderer: Khi chọn template, tự động render đúng các ô input/textarea tương ứng.
+   - Fetch `/api/templates` khi khởi chạy.
+   - Dynamic form renderer: Khi chọn template, tự động render đúng các ô input/textarea tương ứng từ schema trả về từ backend.
+   - Nút Preview Prompt: Gọi `POST /api/prompt/preview` để hiển thị prompt đã được backend biên dịch.
    - Quản lý trạng thái: Tự động collapse form khi đã có `currentProjectId` và active version.
 
 ---
