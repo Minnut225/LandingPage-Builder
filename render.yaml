@@ -2,10 +2,10 @@ services:
   - type: web
     name: crewai-landing-page-builder
     runtime: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: python run_web.py
     envVars:
       - key: PYTHON_VERSION
-        value: 3.12.0
+        value: 3.12.7
       - key: GEMINI_API_KEY
         sync: false
