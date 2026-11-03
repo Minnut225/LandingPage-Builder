@@ -20,13 +20,26 @@ from pydantic import BaseModel
 
 from service import LandingPageService, WorkspaceManager, get_project_workspace
 from web.queue_manager import TaskItem, TaskManager
+from form_schemas import get_templates_metadata
+from prompt_synthesizer import synthesize_prompt
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
+class PreviewPromptRequest(BaseModel):
+    template_id: str
+    form_data: dict[str, Any]
+    style: str = "modern_clean"
+    color_palette: dict[str, Any] | None = None
+
+
 class CreateProjectRequest(BaseModel):
-    prompt: str
+    prompt: str | None = None
+    template_id: str | None = None
+    form_data: dict[str, Any] | None = None
+    style: str = "modern_clean"
+    color_palette: dict[str, Any] | None = None
     output_format: str = "html_css"
 
 
@@ -55,10 +68,16 @@ def create_app(base_dir: Path | None = None) -> FastAPI:
         if task.task_type == "create":
             prompt = task.payload.get("prompt", "")
             output_format = task.payload.get("output_format", "html_css")
+            form_input = task.payload.get("form_input")
             # Run CPU/network synchronous service logic in executor thread
             result = await loop.run_in_executor(
                 None,
-                lambda: service.create_project(prompt, output_format=output_format, progress_callback=progress_cb)
+                lambda: service.create_project(
+                    prompt,
+                    output_format=output_format,
+                    progress_callback=progress_cb,
+                    form_input=form_input,
+                ),
             )
             return result
         elif task.task_type == "revise":
@@ -92,19 +111,53 @@ def create_app(base_dir: Path | None = None) -> FastAPI:
     app.state.task_manager = task_manager
     app.state.projects_base = projects_base
 
+    @app.get("/api/templates")
+    async def get_templates_endpoint():
+        return get_templates_metadata()
+
+    @app.post("/api/prompt/preview")
+    async def preview_prompt_endpoint(req: PreviewPromptRequest):
+        prompt_text = synthesize_prompt(
+            req.template_id, req.form_data, style=req.style, color_palette=req.color_palette
+        )
+        return {"prompt": prompt_text}
+
     @app.post("/api/projects")
     async def create_project_endpoint(req: CreateProjectRequest):
+        prompt = req.prompt
+        form_input = None
+
+        if req.form_data:
+            template_id = req.template_id or "personal_portfolio"
+            prompt = synthesize_prompt(
+                template_id, req.form_data, style=req.style, color_palette=req.color_palette
+            )
+            form_input = {
+                "template_id": template_id,
+                "form_data": req.form_data,
+                "style": req.style,
+                "color_palette": req.color_palette,
+            }
+        elif not prompt or not prompt.strip():
+            raise HTTPException(
+                status_code=400, detail="Either 'prompt' or 'form_data' must be provided"
+            )
+
         project_id = f"lp-{uuid.uuid4().hex[:6]}"
         task = await task_manager.enqueue(
             project_id=project_id,
             task_type="create",
-            payload={"prompt": req.prompt, "output_format": req.output_format}
+            payload={
+                "prompt": prompt,
+                "output_format": req.output_format,
+                "form_input": form_input,
+            },
         )
         return {
             "project_id": project_id,
             "status": "queued",
             "queue_position": task_manager.get_queue_position(project_id),
-            "task_id": task.task_id
+            "task_id": task.task_id,
         }
 
     @app.get("/api/projects/{project_id}")

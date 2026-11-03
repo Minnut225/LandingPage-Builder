@@ -125,7 +125,9 @@ class WorkspaceManager:
         self.manifest_path = self.root_dir / "manifest.json"
         self.versions_dir = self.root_dir / "versions"
 
-    def init_manifest(self, prompt: str, output_format: OutputFormat) -> dict[str, Any]:
+    def init_manifest(
+        self, prompt: str, output_format: OutputFormat, form_input: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         self.root_dir.mkdir(parents=True, exist_ok=True)
         self.versions_dir.mkdir(parents=True, exist_ok=True)
 
@@ -133,6 +135,7 @@ class WorkspaceManager:
             "project_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
             "prompt": prompt,
             "output_format": output_format,
+            "form_input": form_input,
             "state": "created",
             "active_version": None,
             "versions": [],
@@ -412,10 +415,11 @@ class LandingPageService:
         brief: str,
         output_format: OutputFormat = "html_css",
         progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
+        form_input: dict[str, Any] | None = None,
     ) -> VersionResult:
         import crew_builder
 
-        manifest = self.wm.init_manifest(brief, output_format)
+        manifest = self.wm.init_manifest(brief, output_format, form_input=form_input)
 
         # 1. Planning stage
         manifest["state"] = "planning"
