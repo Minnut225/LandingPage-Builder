@@ -1,4 +1,4 @@
-name: CI Test Suite
+name: CI/CD & Deploy to Render
 
 on:
   push:
@@ -32,3 +32,24 @@ jobs:
           PYTHONPATH: .
         run: |
           pytest tests/ -v
+
+  deploy:
+    name: Trigger Deploy to Render
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+
+    steps:
+      - name: Trigger Render Deploy Hook
+        env:
+          RENDER_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$RENDER_HOOK" ]; then
+            echo "ℹ️ Chưa cấu hình secret RENDER_DEPLOY_HOOK_URL trên GitHub."
+            echo "Nếu bạn bật Auto-Deploy trên Render, Render sẽ tự động deploy mỗi khi push code."
+            echo "Để chỉ deploy sau khi test PASS 100%, hãy thêm RENDER_DEPLOY_HOOK_URL vào GitHub Secrets."
+          else
+            echo "🚀 Đã vượt qua 100% bài test! Đang kích hoạt Deploy trên Render..."
+            curl -f -X POST "$RENDER_HOOK"
+            echo "✅ Đã gửi tín hiệu deploy thành công đến Render!"
+          fi
