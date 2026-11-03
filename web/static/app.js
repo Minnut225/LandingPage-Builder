@@ -6,15 +6,44 @@
   let eventSource = null;
   let currentOutputFormat = "html_css";
 
+  // Template & Form State
+  let templatesData = null;
+  let selectedTemplateId = "personal_portfolio";
+  let selectedStyle = "modern_clean";
+  let selectedPaletteId = "tech_blue";
+  let customColor = "#2563EB";
+  let isCreationCollapsed = false;
+
   // DOM Elements
   const projectIdDisplay = document.getElementById("project-id-display");
   const taskStatusBadge = document.getElementById("task-status-badge");
   const formatSelect = document.getElementById("format-select");
-  const promptInput = document.getElementById("prompt-input");
-  const promptCharCount = document.getElementById("prompt-char-count");
+
+  // Creation Panel Elements
+  const creationPanel = document.getElementById("creation-panel");
+  const creationHeader = document.getElementById("creation-header");
+  const creationBody = document.getElementById("creation-body");
+  const creationSummaryBadge = document.getElementById("creation-summary-badge");
+  const creationToggleIcon = document.getElementById("creation-toggle-icon");
+  const btnToggleCreation = document.getElementById("btn-toggle-creation");
+
+  const templateSelect = document.getElementById("template-select");
+  const templateDesc = document.getElementById("template-desc");
+  const styleSelector = document.getElementById("style-selector");
+  const colorPaletteSelector = document.getElementById("color-palette-selector");
+  const customColorPicker = document.getElementById("custom-color-picker");
+  const dynamicFormFields = document.getElementById("dynamic-form-fields");
+
+  const btnTogglePromptPreview = document.getElementById("btn-toggle-prompt-preview");
+  const promptPreviewIcon = document.getElementById("prompt-preview-icon");
+  const promptPreviewContainer = document.getElementById("prompt-preview-container");
+  const promptPreviewText = document.getElementById("prompt-preview-text");
+
   const btnCreate = document.getElementById("btn-create");
   const btnCreateText = document.getElementById("btn-create-text");
   const btnCreateSpinner = document.getElementById("btn-create-spinner");
+
+  // Status & Iteration Elements
   const activityBox = document.getElementById("activity-box");
   const activityText = document.getElementById("activity-text");
   const versionsContainer = document.getElementById("versions-container");
@@ -26,6 +55,8 @@
   const btnApprove = document.getElementById("btn-approve");
   const btnRollback = document.getElementById("btn-rollback");
   const btnExport = document.getElementById("btn-export");
+
+  // Preview elements
   const previewIframe = document.getElementById("preview-iframe");
   const previewPlaceholder = document.getElementById("preview-placeholder");
   const previewUrlDisplay = document.getElementById("preview-url-display");
@@ -57,22 +88,50 @@
     return localStorage.getItem("LP_BACKEND_URL") || (window.ENV_CONFIG && window.ENV_CONFIG.BACKEND_URL) || "";
   }
 
-  function init() {
+  async function init() {
     // Check URL parameters for project
     const urlParams = new URLSearchParams(window.location.search);
     const pid = urlParams.get("project");
-    const isGitHubPages = window.location.hostname.endsWith("github.io");
+
+    await loadTemplates();
 
     if (pid) {
       loadProject(pid);
-    } else if (isGitHubPages) {
-      loadDemoShowcase();
     }
 
-    // Input listeners
-    promptInput.addEventListener("input", () => {
-      promptCharCount.textContent = `${promptInput.value.length} ký tự`;
-    });
+    // Event listeners
+    if (creationHeader) {
+      creationHeader.addEventListener("click", () => toggleCreationPanel(!isCreationCollapsed));
+    }
+    if (btnToggleCreation) {
+      btnToggleCreation.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleCreationPanel(!isCreationCollapsed);
+      });
+    }
+
+    if (templateSelect) {
+      templateSelect.addEventListener("change", (e) => {
+        selectedTemplateId = e.target.value;
+        updateTemplateDescription();
+        renderFormFields(selectedTemplateId);
+        updatePromptPreviewIfOpen();
+      });
+    }
+
+    if (customColorPicker) {
+      customColorPicker.addEventListener("input", (e) => {
+        customColor = e.target.value;
+        // Clear active preset palette styling
+        document.querySelectorAll(".palette-card").forEach(c => c.classList.remove("active"));
+        selectedPaletteId = "custom";
+        updatePromptPreviewIfOpen();
+      });
+    }
+
+    if (btnTogglePromptPreview) {
+      btnTogglePromptPreview.addEventListener("click", togglePromptPreview);
+    }
 
     btnCreate.addEventListener("click", handleCreateProject);
     btnRevise.addEventListener("click", handleReviseProject);
@@ -113,147 +172,291 @@
     }
   }
 
-  function setViewport(size) {
-    [btnVpDesktop, btnVpTablet, btnVpMobile].forEach(btn => btn.classList.remove("active"));
-    if (size === "desktop") {
-      btnVpDesktop.classList.add("active");
-      wrapper.style.maxWidth = "100%";
-    } else if (size === "tablet") {
-      btnVpTablet.classList.add("active");
-      wrapper.style.maxWidth = "768px";
-    } else if (size === "mobile") {
-      btnVpMobile.classList.add("active");
-      wrapper.style.maxWidth = "375px";
+  async function loadTemplates() {
+    const baseApi = getApiBaseUrl();
+    try {
+      const res = await fetch(`${baseApi}/api/templates`);
+      if (!res.ok) throw new Error("Không thể tải danh sách template");
+      templatesData = await res.json();
+    } catch (err) {
+      console.warn("Lỗi tải templates từ API, sử dụng fallback mặc định:", err);
+      templatesData = {
+        templates: {
+          personal_portfolio: {
+            id: "personal_portfolio",
+            name: "Hồ sơ cá nhân / Portfolio",
+            icon: "👤",
+            description: "Dành cho chuyên gia, kỹ sư, designer, freelancer.",
+            fields: [
+              { name: "full_name", label: "Họ và tên", type: "text", required: true, placeholder: "Nguyễn Văn A" },
+              { name: "title", label: "Chức danh", type: "text", required: true, placeholder: "Senior Fullstack Engineer" },
+              { name: "bio", label: "Giới thiệu ngắn", type: "textarea", required: true, placeholder: "Mô tả định hướng chuyên môn..." },
+              { name: "skills", label: "Kỹ năng chính", type: "textarea", required: false, placeholder: "Python, FastAPI\nReact, TypeScript" },
+              { name: "cta_text", label: "Nút CTA", type: "text", required: true, placeholder: "Liên hệ ngay" }
+            ]
+          }
+        },
+        styles: {
+          modern_clean: { id: "modern_clean", name: "Hiện đại & Tối giản", description: "Nền sáng, thanh lịch." },
+          tech_dark: { id: "tech_dark", name: "Tech Dark Mode", description: "Nền tối, ánh sáng neon." }
+        },
+        palettes: {
+          tech_blue: { id: "tech_blue", name: "Tech Blue", primary: "#2563EB", surface: "#F8FAFC", accent: "#0284C7" },
+          emerald_green: { id: "emerald_green", name: "Emerald Green", primary: "#059669", surface: "#F0FDF4", accent: "#10B981" }
+        }
+      };
+    }
+
+    renderTemplateSelector();
+    renderStyleSelector();
+    renderPaletteSelector();
+    renderFormFields(selectedTemplateId);
+  }
+
+  function renderTemplateSelector() {
+    if (!templateSelect || !templatesData) return;
+    templateSelect.innerHTML = "";
+    Object.values(templatesData.templates).forEach(tpl => {
+      const opt = document.createElement("option");
+      opt.value = tpl.id;
+      opt.textContent = `${tpl.icon || "📄"} ${tpl.name}`;
+      if (tpl.id === selectedTemplateId) opt.selected = true;
+      templateSelect.appendChild(opt);
+    });
+    updateTemplateDescription();
+  }
+
+  function updateTemplateDescription() {
+    if (!templateDesc || !templatesData) return;
+    const tpl = templatesData.templates[selectedTemplateId];
+    templateDesc.textContent = tpl ? tpl.description : "";
+  }
+
+  function renderStyleSelector() {
+    if (!styleSelector || !templatesData) return;
+    styleSelector.innerHTML = "";
+    Object.values(templatesData.styles).forEach(st => {
+      const card = document.createElement("div");
+      card.className = `style-card p-2 rounded-lg border text-xs cursor-pointer ${
+        st.id === selectedStyle ? "active border-blue-600 bg-blue-50 text-blue-900" : "border-slate-200 bg-white hover:bg-slate-50 text-slate-700"
+      }`;
+      card.innerHTML = `
+        <div class="font-bold">${st.name}</div>
+        <div class="text-[10px] text-slate-500 line-clamp-1">${st.description}</div>
+      `;
+      card.onclick = () => {
+        document.querySelectorAll(".style-card").forEach(c => c.classList.remove("active", "border-blue-600", "bg-blue-50", "text-blue-900"));
+        card.classList.add("active", "border-blue-600", "bg-blue-50", "text-blue-900");
+        selectedStyle = st.id;
+        updatePromptPreviewIfOpen();
+      };
+      styleSelector.appendChild(card);
+    });
+  }
+
+  function renderPaletteSelector() {
+    if (!colorPaletteSelector || !templatesData) return;
+    colorPaletteSelector.innerHTML = "";
+    Object.values(templatesData.palettes).forEach(pal => {
+      const card = document.createElement("div");
+      card.className = `palette-card p-2 rounded-lg border text-xs cursor-pointer ${
+        pal.id === selectedPaletteId ? "active border-blue-600 bg-blue-50" : "border-slate-200 bg-white hover:bg-slate-50"
+      }`;
+      card.innerHTML = `
+        <div class="flex items-center gap-1.5 mb-1">
+          <span class="w-3.5 h-3.5 rounded-full inline-block" style="background-color: ${pal.primary}"></span>
+          <span class="w-3.5 h-3.5 rounded-full inline-block border border-slate-200" style="background-color: ${pal.accent || pal.surface}"></span>
+          <span class="font-bold text-[11px] text-slate-800">${pal.name}</span>
+        </div>
+      `;
+      card.onclick = () => {
+        document.querySelectorAll(".palette-card").forEach(c => c.classList.remove("active", "border-blue-600", "bg-blue-50"));
+        card.classList.add("active", "border-blue-600", "bg-blue-50");
+        selectedPaletteId = pal.id;
+        customColor = pal.primary;
+        if (customColorPicker) customColorPicker.value = pal.primary;
+        updatePromptPreviewIfOpen();
+      };
+      colorPaletteSelector.appendChild(card);
+    });
+  }
+
+  function renderFormFields(templateId, initialData = {}) {
+    if (!dynamicFormFields || !templatesData) return;
+    dynamicFormFields.innerHTML = "";
+
+    const tpl = templatesData.templates[templateId];
+    if (!tpl || !tpl.fields) return;
+
+    tpl.fields.forEach(field => {
+      const container = document.createElement("div");
+      container.className = "flex flex-col gap-1";
+
+      const label = document.createElement("label");
+      label.className = "text-[11px] font-semibold text-slate-700 flex items-center justify-between";
+      label.innerHTML = `
+        <span>${field.label} ${field.required ? '<span class="text-red-500">*</span>' : ''}</span>
+      `;
+
+      let inputEl;
+      const initVal = initialData[field.name] || "";
+      if (field.type === "textarea") {
+        inputEl = document.createElement("textarea");
+        inputEl.rows = 2;
+        inputEl.className = "w-full text-xs p-2 bg-white border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none transition leading-relaxed";
+      } else {
+        inputEl = document.createElement("input");
+        inputEl.type = "text";
+        inputEl.className = "w-full text-xs p-2 bg-white border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none transition";
+      }
+
+      inputEl.name = field.name;
+      inputEl.id = `field-${field.name}`;
+      inputEl.placeholder = field.placeholder || "";
+      inputEl.value = initVal;
+
+      inputEl.addEventListener("input", () => {
+        updatePromptPreviewIfOpen();
+      });
+
+      container.appendChild(label);
+      container.appendChild(inputEl);
+      dynamicFormFields.appendChild(container);
+    });
+  }
+
+  function getFormData() {
+    const data = {};
+    if (!dynamicFormFields) return data;
+    const inputs = dynamicFormFields.querySelectorAll("input, textarea");
+    inputs.forEach(el => {
+      data[el.name] = el.value.trim();
+    });
+    return data;
+  }
+
+  function getSelectedPaletteObject() {
+    if (selectedPaletteId !== "custom" && templatesData?.palettes?.[selectedPaletteId]) {
+      return templatesData.palettes[selectedPaletteId];
+    }
+    return {
+      name: "Custom Palette",
+      primary: customColor || "#2563EB",
+      surface: "#F8FAFC",
+      accent: "#0284C7"
+    };
+  }
+
+  function toggleCreationPanel(collapsed) {
+    isCreationCollapsed = collapsed;
+    if (collapsed) {
+      creationBody.classList.add("hidden");
+      creationToggleIcon.textContent = "▶ Mở rộng";
+      if (templatesData?.templates?.[selectedTemplateId]) {
+        creationSummaryBadge.textContent = templatesData.templates[selectedTemplateId].name;
+        creationSummaryBadge.classList.remove("hidden");
+      }
+    } else {
+      creationBody.classList.remove("hidden");
+      creationToggleIcon.textContent = "▼ Thu gọn";
+      creationSummaryBadge.classList.add("hidden");
     }
   }
 
-  function setTab(tab) {
-    if (tab === "preview") {
-      btnTabPreview.classList.add("active");
-      btnTabCode.classList.remove("active");
-      codeInspector.classList.add("hidden");
-      if (activeVersion) previewPlaceholder.classList.add("hidden");
+  let promptPreviewDebounceTimer = null;
+  function updatePromptPreviewIfOpen() {
+    if (promptPreviewContainer && !promptPreviewContainer.classList.contains("hidden")) {
+      clearTimeout(promptPreviewDebounceTimer);
+      promptPreviewDebounceTimer = setTimeout(fetchPromptPreview, 300);
+    }
+  }
+
+  function togglePromptPreview() {
+    if (!promptPreviewContainer) return;
+    const isHidden = promptPreviewContainer.classList.contains("hidden");
+    if (isHidden) {
+      promptPreviewContainer.classList.remove("hidden");
+      promptPreviewIcon.textContent = "▲";
+      fetchPromptPreview();
     } else {
-      btnTabCode.classList.add("active");
-      btnTabPreview.classList.remove("active");
-      codeInspector.classList.remove("hidden");
-      loadCodeContent();
+      promptPreviewContainer.classList.add("hidden");
+      promptPreviewIcon.textContent = "▼";
+    }
+  }
+
+  async function fetchPromptPreview() {
+    if (!promptPreviewText) return;
+    promptPreviewText.textContent = "Đang tổng hợp prompt từ Backend...";
+    const baseApi = getApiBaseUrl();
+    try {
+      const res = await fetch(`${baseApi}/api/prompt/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          template_id: selectedTemplateId,
+          form_data: getFormData(),
+          style: selectedStyle,
+          color_palette: getSelectedPaletteObject()
+        })
+      });
+      if (!res.ok) throw new Error("Không thể xem trước prompt");
+      const data = await res.json();
+      promptPreviewText.textContent = data.prompt;
+    } catch (err) {
+      promptPreviewText.textContent = `Lỗi xem trước prompt: ${err.message}`;
     }
   }
 
   async function handleCreateProject() {
-    const prompt = promptInput.value.trim();
-    if (!prompt) {
-      alert("Vui lòng nhập mô tả cho landing page");
-      return;
+    const formData = getFormData();
+    // Validate required fields
+    const tpl = templatesData?.templates?.[selectedTemplateId];
+    if (tpl?.fields) {
+      for (const f of tpl.fields) {
+        if (f.required && !formData[f.name]) {
+          alert(`Vui lòng điền trường bắt buộc: "${f.label}"`);
+          const targetInput = document.getElementById(`field-${f.name}`);
+          if (targetInput) targetInput.focus();
+          return;
+        }
+      }
     }
 
     const baseApi = getApiBaseUrl();
-    const isGitHubPages = window.location.hostname.endsWith("github.io");
-
-    if (isGitHubPages && !baseApi) {
-      const apiKey = localStorage.getItem("LP_API_KEY");
-      if (!apiKey) {
-        settingsModal.classList.remove("hidden");
-        alert("Để sinh trang trực tiếp trên GitHub Pages, bạn cần nhập API Key (Gemini) hoặc URL Backend trong mục Cấu hình API!");
-        return;
-      }
-      await runClientSideGeneration(prompt, apiKey);
-      return;
-    }
-
-    setGeneratingState(true, "Đang khởi tạo dự án...");
+    setGeneratingState(true, "Đang khởi tạo dự án và gửi yêu cầu sang Agent Pipeline...");
     try {
+      const payload = {
+        template_id: selectedTemplateId,
+        form_data: formData,
+        style: selectedStyle,
+        color_palette: getSelectedPaletteObject(),
+        output_format: currentOutputFormat
+      };
+
       const res = await fetch(`${baseApi}/api/projects`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, output_format: currentOutputFormat })
+        body: JSON.stringify(payload)
       });
-      if (!res.ok) throw new Error("Không thể tạo dự án");
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Không thể tạo dự án");
+      }
       const data = await res.json();
       currentProjectId = data.project_id;
       projectIdDisplay.textContent = currentProjectId;
-      
+
       // Update browser URL
       const newUrl = new URL(window.location);
       newUrl.searchParams.set("project", currentProjectId);
       window.history.pushState({}, "", newUrl);
 
+      // Auto-collapse creation form after successful submission
+      toggleCreationPanel(true);
       connectSSE(currentProjectId);
     } catch (err) {
       alert(err.message);
       setGeneratingState(false);
-    }
-  }
-
-  async function runClientSideGeneration(promptText, apiKey) {
-    setGeneratingState(true, "Agent Planning: Đang phân tích yêu cầu cấu trúc...");
-    await new Promise(r => setTimeout(r, 600));
-
-    setGeneratingState(true, "Agent Design: Đang thiết kế hệ thống bảng màu & typography...");
-    await new Promise(r => setTimeout(r, 600));
-
-    setGeneratingState(true, "Agent Frontend: Đang sinh code HTML & Tailwind CSS từ Gemini...");
-    try {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-      const payload = {
-        contents: [{
-          parts: [{
-            text: `You are an expert web developer and UI designer. Create a complete, modern, beautiful, responsive single-file landing page using Tailwind CSS (via CDN https://cdn.tailwindcss.com) based on the user's brief: "${promptText}". 
-Requirements:
-1. Include a responsive navbar, hero section, features grid, pricing/CTA section, and clean footer.
-2. Return ONLY valid, standalone HTML starting with <!doctype html>...</html> without markdown code blocks, backticks, or preamble.`
-          }]
-        }]
-      };
-
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error?.message || "Lỗi gọi API Gemini");
-      }
-
-      const data = await res.json();
-      let html = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      html = html.replace(/^```(?:html)?\s*/i, "").replace(/\s*```$/i, "").trim();
-
-      setGeneratingState(true, "Agent QA: Đang kiểm tra chất lượng và tiêu chuẩn thiết kế...");
-      await new Promise(r => setTimeout(r, 500));
-
-      currentProjectId = "git-" + Math.random().toString(36).substring(2, 8);
-      projectIdDisplay.textContent = currentProjectId;
-      activeVersion = 1;
-      versionsList = [1];
-      window.currentDemoHtml = html;
-
-      renderVersionsList();
-      renderQAReport({
-        summary: "QA Evaluation Report",
-        checks: [
-          { status: "pass", name: "Responsive Layout & Viewport", details: "Layout thích ứng hoàn hảo các độ phân giải." },
-          { status: "pass", name: "Design Contract: Colors & Typography", details: "Màu sắc đồng bộ, cấu trúc phân cấp trực quan." },
-          { status: "pass", name: "Form & Nút Kêu Gọi Hành Động (CTA)", details: "Các nút bấm và form được căn chỉnh rõ ràng." },
-          { status: "pass", name: "Bảo Vệ Dữ Liệu Thực Tế", details: "Không sinh dữ liệu cá nhân giả mạo." }
-        ]
-      });
-
-      previewPlaceholder.classList.add("hidden");
-      previewIframe.srcdoc = html;
-      previewUrlDisplay.textContent = "client-generated://index.html";
-      linkExternal.classList.add("hidden");
-
-      setGeneratingState(false);
-      taskStatusBadge.textContent = "Đã sinh thành công";
-      taskStatusBadge.className = "text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300";
-      taskStatusBadge.classList.remove("hidden");
-    } catch (err) {
-      setGeneratingState(false);
-      alert(`Sinh trang thất bại: ${err.message}`);
     }
   }
 
@@ -266,19 +469,6 @@ Requirements:
     if (!currentProjectId) return;
 
     const baseApi = getApiBaseUrl();
-    const isGitHubPages = window.location.hostname.endsWith("github.io");
-
-    if (isGitHubPages && !baseApi) {
-      const apiKey = localStorage.getItem("LP_API_KEY");
-      if (apiKey && window.currentDemoHtml) {
-        setGeneratingState(true, "Agent Revision: Đang chỉnh sửa theo feedback...");
-        const revisionPrompt = `Modify this existing HTML landing page based on the feedback: "${feedback}". Keep all other good parts unchanged. Original HTML:\n${window.currentDemoHtml}`;
-        await runClientSideGeneration(revisionPrompt, apiKey);
-        feedbackInput.value = "";
-        return;
-      }
-    }
-
     setGeneratingState(true, "Đang đưa yêu cầu chỉnh sửa vào hàng đợi...");
     try {
       const res = await fetch(`${baseApi}/api/projects/${currentProjectId}/revise`, {
@@ -298,13 +488,13 @@ Requirements:
     if (!currentProjectId) return;
     const baseApi = getApiBaseUrl();
     try {
-      const res = await fetch(`${baseApi}/api/projects/${currentProjectId}/approve`, { method: "POST" });
-      if (!res.ok) throw new Error("Duyệt trang thất bại");
+      const res = await fetch(`${baseApi}/api/projects/${currentProjectId}/approve`, {
+        method: "POST"
+      });
+      if (!res.ok) throw new Error("Không thể duyệt trang");
       const data = await res.json();
-      alert("Đã duyệt trang thành công!");
-      taskStatusBadge.textContent = "Đã duyệt";
-      taskStatusBadge.className = "text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300";
-      taskStatusBadge.classList.remove("hidden");
+      alert(`Dự án đã được duyệt thành công! Trạng thái: ${data.state}`);
+      await loadProject(currentProjectId);
     } catch (err) {
       alert(err.message);
     }
@@ -335,14 +525,6 @@ Requirements:
 
   function handleExportZip() {
     if (!currentProjectId) return;
-    if (window.currentDemoHtml) {
-      const blob = new Blob([window.currentDemoHtml], { type: "text/html;charset=utf-8" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `${currentProjectId}_v${activeVersion || 1}.html`;
-      a.click();
-      return;
-    }
     const baseApi = getApiBaseUrl();
     window.location.href = `${baseApi}/api/projects/${currentProjectId}/export`;
   }
@@ -355,15 +537,35 @@ Requirements:
       const data = await res.json();
       currentProjectId = data.project_id;
       projectIdDisplay.textContent = currentProjectId;
-      
+
       const manifest = data.manifest;
-      promptInput.value = manifest.prompt || "";
-      promptCharCount.textContent = `${promptInput.value.length} ký tự`;
       formatSelect.value = manifest.output_format || "html_css";
       currentOutputFormat = manifest.output_format || "html_css";
 
+      // If project has structured form input, restore fields
+      if (manifest.form_input) {
+        const fi = manifest.form_input;
+        if (fi.template_id) {
+          selectedTemplateId = fi.template_id;
+          if (templateSelect) templateSelect.value = selectedTemplateId;
+          updateTemplateDescription();
+        }
+        if (fi.style) selectedStyle = fi.style;
+        if (fi.color_palette) {
+          selectedPaletteId = fi.color_palette.id || "custom";
+          customColor = fi.color_palette.primary || "#2563EB";
+          if (customColorPicker) customColorPicker.value = customColor;
+        }
+        renderFormFields(selectedTemplateId, fi.form_data || {});
+        renderStyleSelector();
+        renderPaletteSelector();
+      }
+
       activeVersion = manifest.active_version;
       versionsList = manifest.versions || [];
+
+      // Auto-collapse creation form since project exists
+      toggleCreationPanel(true);
 
       renderVersionsList();
       renderQAReport(data.qa_report);
@@ -378,62 +580,100 @@ Requirements:
   function connectSSE(projectId) {
     const baseApi = getApiBaseUrl();
     if (eventSource) eventSource.close();
-    eventSource = new EventSource(`${baseApi}/api/projects/${projectId}/stream`);
 
-    eventSource.addEventListener("queued", (e) => {
+    const streamUrl = `${baseApi}/api/projects/${projectId}/stream`;
+    eventSource = new EventSource(streamUrl);
+
+    eventSource.addEventListener("connected", () => {
+      taskStatusBadge.textContent = "Đang kết nối...";
+      taskStatusBadge.className = "text-xs px-2.5 py-1 rounded-full font-semibold bg-blue-100 text-blue-800";
+      taskStatusBadge.classList.remove("hidden");
+    });
+
+    eventSource.addEventListener("progress", (e) => {
       const data = JSON.parse(e.data);
-      const pos = data.queue_position;
-      setGeneratingState(true, pos > 0 ? `Đang chờ trong hàng đợi (Vị trí #${pos})...` : "Đang chuẩn bị chạy...");
+      const stage = data.stage;
+      activityBox.classList.remove("hidden");
+      activityText.textContent = `Agent đang thực thi: [${stage.toUpperCase()}]`;
+
+      taskStatusBadge.textContent = `Đang xử lý: ${stage}`;
+      taskStatusBadge.className = "text-xs px-2.5 py-1 rounded-full font-semibold bg-amber-100 text-amber-800";
+      taskStatusBadge.classList.remove("hidden");
     });
 
-    eventSource.addEventListener("started", () => {
-      setGeneratingState(true, "Bắt đầu tiến trình tạo trang...");
-    });
-
-    eventSource.addEventListener("planning", () => {
-      setGeneratingState(true, "Agent 1: Lập kế hoạch cấu trúc nội dung (Planning)...");
-    });
-
-    eventSource.addEventListener("designing", () => {
-      setGeneratingState(true, "Agent 2: Thiết kế hệ thống giao diện (Design System)...");
-    });
-
-    eventSource.addEventListener("generating", () => {
-      setGeneratingState(true, "Agent 3: Lập trình frontend & Tailwind CSS...");
-    });
-
-    eventSource.addEventListener("revising", () => {
-      setGeneratingState(true, "Agent Revision: Phân tích thay đổi và lập kế hoạch sửa đổi...");
-    });
-
-    eventSource.addEventListener("qa_review", () => {
-      setGeneratingState(true, "Agent 4: Kiểm thử chất lượng trang (QA Review)...");
-    });
-
-    eventSource.addEventListener("completed", async () => {
+    eventSource.addEventListener("completed", (e) => {
+      activityBox.classList.add("hidden");
       setGeneratingState(false);
-      await loadProject(currentProjectId);
+
+      taskStatusBadge.textContent = "Hoàn thành";
+      taskStatusBadge.className = "text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-100 text-emerald-800";
+
+      loadProject(projectId);
     });
 
     eventSource.addEventListener("failed", (e) => {
       const data = JSON.parse(e.data);
+      activityBox.classList.add("hidden");
       setGeneratingState(false);
-      alert(`Tiến trình thất bại: ${data.error || "Lỗi không xác định"}`);
+
+      taskStatusBadge.textContent = "Thất bại";
+      taskStatusBadge.className = "text-xs px-2.5 py-1 rounded-full font-semibold bg-red-100 text-red-800";
+
+      alert(`Thực thi thất bại: ${data.error || "Lỗi không xác định"}`);
+      loadProject(projectId);
     });
+
+    eventSource.onerror = () => {
+      taskStatusBadge.textContent = "Mất kết nối SSE";
+      taskStatusBadge.className = "text-xs px-2.5 py-1 rounded-full font-semibold bg-slate-200 text-slate-700";
+    };
   }
 
-  function setGeneratingState(isGenerating, message = "") {
-    if (isGenerating) {
-      btnCreate.disabled = true;
-      btnRevise.disabled = true;
-      btnCreateSpinner.classList.remove("hidden");
+  function setGeneratingState(isBusy, message) {
+    btnCreate.disabled = isBusy;
+    btnRevise.disabled = isBusy;
+    if (btnCreateSpinner) {
+      if (isBusy) {
+        btnCreateSpinner.classList.remove("hidden");
+        btnCreateText.textContent = "Đang xử lý...";
+      } else {
+        btnCreateSpinner.classList.add("hidden");
+        btnCreateText.textContent = "Tạo Landing Page";
+      }
+    }
+    if (message) {
       activityBox.classList.remove("hidden");
       activityText.textContent = message;
-    } else {
-      btnCreate.disabled = false;
-      btnRevise.disabled = false;
-      btnCreateSpinner.classList.add("hidden");
+    } else if (!isBusy) {
       activityBox.classList.add("hidden");
+    }
+  }
+
+  function setViewport(size) {
+    [btnVpDesktop, btnVpTablet, btnVpMobile].forEach(btn => btn.classList.remove("active"));
+    if (size === "desktop") {
+      btnVpDesktop.classList.add("active");
+      wrapper.style.maxWidth = "100%";
+    } else if (size === "tablet") {
+      btnVpTablet.classList.add("active");
+      wrapper.style.maxWidth = "768px";
+    } else if (size === "mobile") {
+      btnVpMobile.classList.add("active");
+      wrapper.style.maxWidth = "375px";
+    }
+  }
+
+  function setTab(tab) {
+    if (tab === "preview") {
+      btnTabPreview.classList.add("active");
+      btnTabCode.classList.remove("active");
+      codeInspector.classList.add("hidden");
+      if (activeVersion) previewPlaceholder.classList.add("hidden");
+    } else {
+      btnTabCode.classList.add("active");
+      btnTabPreview.classList.remove("active");
+      codeInspector.classList.remove("hidden");
+      loadCodeContent();
     }
   }
 
@@ -441,6 +681,11 @@ Requirements:
     versionsContainer.innerHTML = "";
     if (!versionsList.length) {
       versionsContainer.innerHTML = '<span class="text-xs text-slate-400 italic">Chưa có phiên bản nào</span>';
+      activeVersionPill.textContent = "v0";
+      btnExport.disabled = true;
+      btnRevise.disabled = true;
+      btnApprove.disabled = true;
+      btnRollback.disabled = true;
       return;
     }
 
@@ -502,14 +747,6 @@ Requirements:
       return;
     }
 
-    if (window.currentDemoHtml) {
-      previewPlaceholder.classList.add("hidden");
-      previewIframe.srcdoc = window.currentDemoHtml;
-      previewUrlDisplay.textContent = "client-generated://index.html";
-      linkExternal.classList.add("hidden");
-      return;
-    }
-
     const baseApi = getApiBaseUrl();
     previewPlaceholder.classList.add("hidden");
     const previewUrl = `${baseApi}/preview/${currentProjectId}/index.html?t=${Date.now()}`;
@@ -520,10 +757,6 @@ Requirements:
   }
 
   function reloadPreview() {
-    if (window.currentDemoHtml) {
-      previewIframe.srcdoc = window.currentDemoHtml;
-      return;
-    }
     if (previewIframe && previewIframe.src !== "about:blank") {
       previewIframe.contentWindow?.location.reload();
     }
@@ -532,10 +765,6 @@ Requirements:
   async function loadCodeContent() {
     if (!currentProjectId || !activeVersion) {
       codeDisplay.textContent = "// Chưa có mã nguồn";
-      return;
-    }
-    if (window.currentDemoHtml) {
-      codeDisplay.textContent = window.currentDemoHtml;
       return;
     }
     const baseApi = getApiBaseUrl();
@@ -555,43 +784,7 @@ Requirements:
   function selectVersion(v) {
     activeVersion = v;
     renderVersionsList();
-    if (window.location.hostname.endsWith("github.io")) {
-      previewPlaceholder.classList.add("hidden");
-      previewIframe.src = "demo_preview.html";
-      previewUrlDisplay.textContent = "demo_preview.html";
-    } else {
-      updatePreviewFrame();
-    }
-  }
-
-  function loadDemoShowcase() {
-    currentProjectId = "demo-showcase";
-    projectIdDisplay.textContent = "demo-showcase";
-    promptInput.value = "Landing page bán khóa học Vibe Coding cho lập trình viên, phong cách tối giản, tone xanh dương công nghệ, có bảng giá và form đăng ký.";
-    promptCharCount.textContent = `${promptInput.value.length} ký tự`;
-    activeVersion = 1;
-    versionsList = [1, 2];
-
-    taskStatusBadge.textContent = "GitHub Pages Demo";
-    taskStatusBadge.className = "text-xs px-2.5 py-1 rounded-full font-semibold bg-blue-50 text-blue-700 border border-blue-200";
-    taskStatusBadge.classList.remove("hidden");
-
-    renderVersionsList();
-    renderQAReport({
-      summary: "QA Evaluation Report",
-      checks: [
-        { status: "pass", name: "Responsive Layout & Viewport", details: "Desktop/Tablet/Mobile viewports render cleanly." },
-        { status: "pass", name: "Design Contract Colors & Typography", details: "Matches tone and minimalism specs." },
-        { status: "pass", name: "CTA Form & Buttons", details: "All buttons clearly labeled and positioned." },
-        { status: "pass", name: "No Fake PII / Verified Placeholders", details: "Verified clean of fabricated identities." }
-      ]
-    });
-
-    previewPlaceholder.classList.add("hidden");
-    previewIframe.src = "demo_preview.html";
-    previewUrlDisplay.textContent = "demo_preview.html";
-    linkExternal.href = "demo_preview.html";
-    linkExternal.classList.remove("hidden");
+    updatePreviewFrame();
   }
 
   // Run on load
