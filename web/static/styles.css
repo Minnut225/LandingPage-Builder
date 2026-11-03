@@ -30,3 +30,23 @@
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   font-weight: 600;
 }
+
+/* Form Styles & Palette Selection */
+.style-card {
+  transition: all 0.15s ease-in-out;
+  cursor: pointer;
+}
+.style-card.active {
+  border-color: #2563eb !important;
+  background-color: #eff6ff !important;
+  box-shadow: 0 0 0 1px #2563eb;
+}
+
+.palette-card {
+  transition: all 0.15s ease-in-out;
+  cursor: pointer;
+}
+.palette-card.active {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 1px #2563eb;
+}
