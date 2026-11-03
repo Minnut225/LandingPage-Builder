@@ -327,3 +327,8 @@ def create_app(base_dir: Path | None = None) -> FastAPI:
         app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
     return app
+
+
+# Default application instance for ASGI servers (Uvicorn, Gunicorn, Render)
+app = create_app()
+

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import socket
 import sys
 import threading
@@ -38,11 +39,15 @@ def open_browser(url: str, delay: float = 1.2) -> None:
 
 
 def main() -> None:
+    # Detect cloud environment (Render, Railway, etc.)
+    env_port = int(os.environ.get("PORT", 8000))
+    is_cloud = bool(os.environ.get("RENDER") or os.environ.get("RAILWAY_STATIC_URL") or os.environ.get("PORT"))
+
     parser = argparse.ArgumentParser(description="Start the Landing Page Builder Web Studio")
-    parser.add_argument("--host", default=None, help="Host to bind (default: 127.0.0.1 or 0.0.0.0 if --lan is used)")
-    parser.add_argument("--port", type=int, default=8000, help="Port to bind (default: 8000)")
+    parser.add_argument("--host", default="0.0.0.0" if is_cloud else None, help="Host to bind (default: 127.0.0.1 or 0.0.0.0 on cloud/lan)")
+    parser.add_argument("--port", type=int, default=env_port, help=f"Port to bind (default: {env_port})")
     parser.add_argument("--lan", action="store_true", help="Host on LAN (bind to 0.0.0.0 to allow access from other devices)")
-    parser.add_argument("--no-browser", action="store_true", help="Do not automatically open the browser")
+    parser.add_argument("--no-browser", action="store_true", default=is_cloud, help="Do not automatically open the browser")
     parser.add_argument("--reload", action="store_true", help="Enable uvicorn auto-reload")
     args = parser.parse_args()
 
