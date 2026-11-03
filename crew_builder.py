@@ -28,12 +28,9 @@ def _make_llm():
     """Build an LLM from environment variables using CrewAI's common LLM interface."""
     from crewai import LLM
 
-    model = os.getenv("MODEL", "").strip()
+    model = os.getenv("MODEL", "").strip() or "gemini/gemini-2.5-flash"
     api_key = os.getenv("API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip() or None
     base_url = os.getenv("BASE_URL", "").strip() or None
-
-    if not model:
-        raise ValueError("MODEL is required in .env")
 
     kwargs: dict[str, Any] = {"model": model}
     if api_key:
