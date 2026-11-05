@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from service import LandingPageService, WorkspaceManager, get_project_workspace
 from web.queue_manager import TaskItem, TaskManager
 from form_schemas import get_templates_metadata
-from prompt_synthesizer import synthesize_prompt
+from prompt_synthesizer import synthesize_form_revision_feedback, synthesize_prompt
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -44,8 +44,12 @@ class CreateProjectRequest(BaseModel):
 
 
 class ReviseProjectRequest(BaseModel):
-    feedback: str
+    feedback: str = ""
     target_section: str | None = None
+    template_id: str | None = None
+    form_data: dict[str, Any] | None = None
+    style: str | None = None
+    color_palette: dict[str, Any] | None = None
 
 
 class RollbackRequest(BaseModel):
@@ -83,9 +87,15 @@ def create_app(base_dir: Path | None = None) -> FastAPI:
         elif task.task_type == "revise":
             feedback = task.payload.get("feedback", "")
             target_section = task.payload.get("target_section")
+            form_input = task.payload.get("form_input")
             result = await loop.run_in_executor(
                 None,
-                lambda: service.revise_project(feedback, target_section=target_section, progress_callback=progress_cb)
+                lambda: service.revise_project(
+                    feedback,
+                    target_section=target_section,
+                    progress_callback=progress_cb,
+                    form_input=form_input,
+                ),
             )
             return result
 
@@ -178,12 +188,24 @@ def create_app(base_dir: Path | None = None) -> FastAPI:
                 except Exception:
                     pass
 
+        version_form_inputs: dict[str, Any] = {}
+        for v in manifest.get("versions", []):
+            meta_file = ws.versions_dir / f"v{v}" / "metadata.json"
+            if meta_file.exists():
+                try:
+                    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                    if meta.get("form_input") is not None:
+                        version_form_inputs[str(v)] = meta["form_input"]
+                except Exception:
+                    pass
+
         return {
             "project_id": project_id,
             "manifest": manifest,
             "active_version": active_v,
             "qa_report": qa_report,
-            "queue_position": task_manager.get_queue_position(project_id)
+            "version_form_inputs": version_form_inputs,
+            "queue_position": task_manager.get_queue_position(project_id),
         }
 
     @app.get("/api/projects/{project_id}/stream")
@@ -216,14 +238,56 @@ def create_app(base_dir: Path | None = None) -> FastAPI:
     async def revise_project_endpoint(project_id: str, req: ReviseProjectRequest):
         try:
             ws = get_project_workspace(project_id, base_dir=projects_base)
-            _ = ws.get_manifest()
+            manifest = ws.get_manifest()
         except Exception:
             raise HTTPException(status_code=404, detail="Project not found")
+
+        active_v = manifest.get("active_version")
+        versions = manifest.get("versions", [])
+        source_v = active_v if active_v is not None else (max(versions) if versions else None)
+
+        old_form_input = manifest.get("form_input")
+        if source_v is not None:
+            meta_file = ws.versions_dir / f"v{source_v}" / "metadata.json"
+            if meta_file.exists():
+                try:
+                    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                    if meta.get("form_input") is not None:
+                        old_form_input = meta["form_input"]
+                except Exception:
+                    pass
+
+        new_form_input = None
+        if req.form_data is not None:
+            base_old = old_form_input if isinstance(old_form_input, dict) else {}
+            new_form_input = {
+                "template_id": req.template_id or base_old.get("template_id") or "personal_portfolio",
+                "form_data": req.form_data,
+                "style": req.style or base_old.get("style") or "modern_clean",
+                "color_palette": req.color_palette if req.color_palette is not None else base_old.get("color_palette"),
+            }
+            _, _, has_changes = synthesize_form_revision_feedback(
+                old_form_input, new_form_input, extra_feedback=req.feedback
+            )
+            if not has_changes:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Không có thay đổi nào trong Properties hoặc nội dung góp ý so với phiên bản hiện tại.",
+                )
+        elif not req.feedback or not req.feedback.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Vui lòng nhập nội dung góp ý hoặc thay đổi Properties.",
+            )
 
         task = await task_manager.enqueue(
             project_id=project_id,
             task_type="revise",
-            payload={"feedback": req.feedback, "target_section": req.target_section}
+            payload={
+                "feedback": req.feedback,
+                "target_section": req.target_section,
+                "form_input": new_form_input,
+            },
         )
         return {
             "project_id": project_id,
@@ -331,4 +395,3 @@ def create_app(base_dir: Path | None = None) -> FastAPI:
 
 # Default application instance for ASGI servers (Uvicorn, Gunicorn, Render)
 app = create_app()
-
