@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+import contextvars
 import json
+import logging
 import os
+import random
 import re
 import shutil
+import time
+from collections.abc import Awaitable, Callable, Iterator
 from datetime import datetime
+from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import yaml
 from crewai import Agent, Crew, Process, Task
@@ -17,11 +24,344 @@ from service import OutputFormat, extract_code_payload, extract_json_payload
 ROOT_DIR = Path(__file__).resolve().parent
 MAX_HTML_CHARS = 150_000
 
+DEFAULT_LLM_MAX_ATTEMPTS = 5
+DEFAULT_LLM_RETRY_INITIAL_DELAY = 2.0
+DEFAULT_LLM_RETRY_MAX_DELAY = 30.0
+DEFAULT_LLM_RETRY_JITTER_RATIO = 0.2
+
+_NON_RETRYABLE_HTTP_CODES = frozenset({400, 401, 403, 404, 422})
+_RETRYABLE_HTTP_CODES = frozenset({408, 429, 500, 502, 503, 504, 529})
+_NON_RETRYABLE_STATUS_SLUGS = frozenset(
+    {
+        "invalidapikey",
+        "unauthenticated",
+        "authenticationerror",
+        "permissiondenied",
+        "notfound",
+        "invalidargument",
+        "insufficientquota",
+        "servicequotaexceededexception",
+    }
+)
+_RETRYABLE_STATUS_SLUGS = frozenset(
+    {
+        "unavailable",
+        "resourceexhausted",
+        "overloaded",
+        "overloadederror",
+        "ratelimiterror",
+        "ratelimitexceeded",
+        "toomanyrequests",
+        "throttlingexception",
+        "deadlineexceeded",
+        "servererror",
+        "serviceunavailableerror",
+    }
+)
+_RETRYABLE_EXCEPTION_CLASS_NAMES = frozenset(
+    {
+        "TimeoutException",
+        "ReadTimeout",
+        "ConnectTimeout",
+        "WriteTimeout",
+        "PoolTimeout",
+        "ConnectError",
+        "RemoteProtocolError",
+        "TransportError",
+        "APIConnectionError",
+        "APITimeoutError",
+        "RateLimitError",
+        "InternalServerError",
+        "ServiceUnavailableError",
+    }
+)
+_RETRYABLE_MESSAGE_MARKERS = (
+    "503 unavailable",
+    "experiencing high demand",
+    "spikes in demand",
+    "service unavailable",
+    "temporarily unavailable",
+    "overloaded",
+    "rate limit",
+    "rate-limit",
+    "too many requests",
+    "resource exhausted",
+    "timed out",
+    "connection reset",
+    "bad gateway",
+    "gateway timeout",
+)
+
+_T = TypeVar("_T")
+_active_transient_retry: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_active_transient_retry", default=False
+)
+logger = logging.getLogger(__name__)
+
 load_dotenv(ROOT_DIR / ".env")
 
 # Export extractors for external and test usage
 _extract_json = extract_json_payload
 _extract_code = extract_code_payload
+
+
+def _iter_error_chain(error: BaseException) -> Iterator[BaseException]:
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def _extract_http_status(error: BaseException) -> int | None:
+    for attr in ("status_code", "code"):
+        val = getattr(error, attr, None)
+        if isinstance(val, bool):
+            continue
+        if isinstance(val, int) and 100 <= val <= 599:
+            return val
+        if isinstance(val, str) and val.isdigit():
+            parsed = int(val)
+            if 100 <= parsed <= 599:
+                return parsed
+
+    response = getattr(error, "response", None)
+    resp_status = getattr(response, "status_code", None)
+    if isinstance(resp_status, int) and 100 <= resp_status <= 599:
+        return resp_status
+
+    for mapping_attr in ("details", "response"):
+        payload = getattr(error, mapping_attr, None)
+        if isinstance(payload, dict):
+            err_obj = payload.get("error") or payload.get("Error") or payload
+            if isinstance(err_obj, dict):
+                raw_code = err_obj.get("code") or err_obj.get("Code")
+                if isinstance(raw_code, int) and 100 <= raw_code <= 599:
+                    return raw_code
+
+    msg = str(error)
+    code_match = re.search(
+        r"(?:['\"]code['\"]\s*:\s*|status(?:_code)?\s*[=:]\s*|\bHTTP(?:/\d(?:\.\d)?)?\s+)"
+        r"(400|401|403|404|408|422|429|500|502|503|504|529)\b"
+        r"|\b(400|401|403|404|408|422|429|500|502|503|504|529)\s+"
+        r"(?:UNAVAILABLE|SERVICE[_\s]+UNAVAILABLE|TOO[_\s]+MANY[_\s]+REQUESTS|RESOURCE[_\s]+EXHAUSTED|"
+        r"INTERNAL(?:[_\s]+SERVER[_\s]+ERROR)?|BAD[_\s]+GATEWAY|GATEWAY[_\s]+TIMEOUT|REQUEST[_\s]+TIMEOUT|"
+        r"OVERLOADED|UNAUTHENTICATED|UNAUTHORIZED|PERMISSION[_\s]+DENIED|FORBIDDEN|NOT[_\s]+FOUND|"
+        r"BAD[_\s]+REQUEST|INVALID[_\s]+ARGUMENT)\b",
+        msg,
+        re.IGNORECASE,
+    )
+    if code_match:
+        matched = code_match.group(1) or code_match.group(2)
+        return int(matched)
+    return None
+
+
+def _extract_status_slug(error: BaseException) -> str:
+    status = getattr(error, "status", None)
+    if isinstance(status, str) and status.strip():
+        return re.sub(r"[^a-z0-9]", "", status.lower())
+    code = getattr(error, "code", None)
+    if isinstance(code, str) and not code.isdigit():
+        return re.sub(r"[^a-z0-9]", "", code.lower())
+    return re.sub(r"[^a-z0-9]", "", error.__class__.__name__.lower())
+
+
+def is_transient_llm_error(error: BaseException) -> bool:
+    """Return True when an LLM/provider exception is transient and safe to retry."""
+    chain = tuple(_iter_error_chain(error))
+
+    for candidate in chain:
+        http_code = _extract_http_status(candidate)
+        if http_code in _NON_RETRYABLE_HTTP_CODES:
+            return False
+        if _extract_status_slug(candidate) in _NON_RETRYABLE_STATUS_SLUGS:
+            return False
+
+    for candidate in chain:
+        http_code = _extract_http_status(candidate)
+        if http_code in _RETRYABLE_HTTP_CODES:
+            return True
+        if isinstance(candidate, (TimeoutError, ConnectionError)):
+            return True
+        if candidate.__class__.__name__ in _RETRYABLE_EXCEPTION_CLASS_NAMES:
+            return True
+        if _extract_status_slug(candidate) in _RETRYABLE_STATUS_SLUGS:
+            return True
+        lowered = str(candidate).lower()
+        if any(marker in lowered for marker in _RETRYABLE_MESSAGE_MARKERS):
+            return True
+
+    return False
+
+
+def _extract_retry_after_seconds(error: BaseException) -> float | None:
+    for candidate in _iter_error_chain(error):
+        headers = getattr(candidate, "headers", None)
+        response = getattr(candidate, "response", None)
+        if headers is None and response is not None:
+            headers = getattr(response, "headers", None)
+            if headers is None and isinstance(response, dict):
+                metadata = response.get("ResponseMetadata") or {}
+                headers = metadata.get("HTTPHeaders") or response.get("headers")
+        if headers is None:
+            continue
+        retry_after = None
+        if hasattr(headers, "get"):
+            retry_after = headers.get("retry-after") or headers.get("Retry-After")
+        if retry_after is None:
+            continue
+        try:
+            return max(0.0, float(retry_after))
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _get_retry_settings() -> tuple[int, float, float]:
+    try:
+        max_attempts = max(1, int(os.getenv("LLM_MAX_ATTEMPTS", str(DEFAULT_LLM_MAX_ATTEMPTS))))
+    except ValueError:
+        max_attempts = DEFAULT_LLM_MAX_ATTEMPTS
+
+    try:
+        initial_delay = max(
+            0.0, float(os.getenv("LLM_RETRY_INITIAL_DELAY", str(DEFAULT_LLM_RETRY_INITIAL_DELAY)))
+        )
+    except ValueError:
+        initial_delay = DEFAULT_LLM_RETRY_INITIAL_DELAY
+
+    try:
+        max_delay = max(
+            initial_delay, float(os.getenv("LLM_RETRY_MAX_DELAY", str(DEFAULT_LLM_RETRY_MAX_DELAY)))
+        )
+    except ValueError:
+        max_delay = max(initial_delay, DEFAULT_LLM_RETRY_MAX_DELAY)
+
+    return max_attempts, initial_delay, max_delay
+
+
+def _compute_retry_delay(
+    retry_number: int,
+    initial_delay: float,
+    max_delay: float,
+    retry_after: float | None = None,
+) -> float:
+    if retry_after is not None:
+        return retry_after
+    base_delay = min(initial_delay * (2 ** (retry_number - 1)), max_delay)
+    jitter = (random.random() * 2.0 - 1.0) * DEFAULT_LLM_RETRY_JITTER_RATIO
+    return max(0.0, base_delay * (1.0 + jitter))
+
+
+def run_with_llm_retry(operation: Callable[[], _T]) -> _T:
+    """Execute a synchronous LLM/Crew operation with bounded exponential-backoff retries."""
+    if _active_transient_retry.get():
+        return operation()
+
+    max_attempts, initial_delay, max_delay = _get_retry_settings()
+    token = _active_transient_retry.set(True)
+    try:
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return operation()
+            except Exception as exc:
+                if getattr(exc, "_llm_retry_exhausted", False) or not is_transient_llm_error(exc):
+                    raise
+                if attempt >= max_attempts:
+                    try:
+                        setattr(exc, "_llm_retry_exhausted", True)
+                    except Exception:
+                        pass
+                    raise
+                delay = _compute_retry_delay(
+                    retry_number=attempt,
+                    initial_delay=initial_delay,
+                    max_delay=max_delay,
+                    retry_after=_extract_retry_after_seconds(exc),
+                )
+                logger.warning(
+                    "Transient LLM error on attempt %d/%d (%s). Retrying in %.2fs...",
+                    attempt,
+                    max_attempts,
+                    exc,
+                    delay,
+                )
+                time.sleep(delay)
+    finally:
+        _active_transient_retry.reset(token)
+
+    raise RuntimeError("Unreachable retry loop exit")
+
+
+async def arun_with_llm_retry(operation: Callable[[], Awaitable[_T]]) -> _T:
+    """Execute an asynchronous LLM operation with bounded exponential-backoff retries."""
+    if _active_transient_retry.get():
+        return await operation()
+
+    max_attempts, initial_delay, max_delay = _get_retry_settings()
+    token = _active_transient_retry.set(True)
+    try:
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return await operation()
+            except Exception as exc:
+                if getattr(exc, "_llm_retry_exhausted", False) or not is_transient_llm_error(exc):
+                    raise
+                if attempt >= max_attempts:
+                    try:
+                        setattr(exc, "_llm_retry_exhausted", True)
+                    except Exception:
+                        pass
+                    raise
+                delay = _compute_retry_delay(
+                    retry_number=attempt,
+                    initial_delay=initial_delay,
+                    max_delay=max_delay,
+                    retry_after=_extract_retry_after_seconds(exc),
+                )
+                logger.warning(
+                    "Transient async LLM error on attempt %d/%d (%s). Retrying in %.2fs...",
+                    attempt,
+                    max_attempts,
+                    exc,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+    finally:
+        _active_transient_retry.reset(token)
+
+    raise RuntimeError("Unreachable async retry loop exit")
+
+
+def _wrap_llm_with_retry(llm: Any) -> Any:
+    """Wrap an LLM instance's sync/async call methods with transient-error retries."""
+    if getattr(llm, "_transient_retry_wrapped", False):
+        return llm
+
+    orig_call = getattr(llm, "call", None)
+    if callable(orig_call):
+        @wraps(orig_call)
+        def call_with_retry(*args: Any, **kwargs: Any) -> Any:
+            return run_with_llm_retry(lambda: orig_call(*args, **kwargs))
+
+        object.__setattr__(llm, "call", call_with_retry)
+
+    orig_acall = getattr(llm, "acall", None)
+    if callable(orig_acall):
+        @wraps(orig_acall)
+        async def acall_with_retry(*args: Any, **kwargs: Any) -> Any:
+            return await arun_with_llm_retry(lambda: orig_acall(*args, **kwargs))
+
+        object.__setattr__(llm, "acall", acall_with_retry)
+
+    object.__setattr__(llm, "_transient_retry_wrapped", True)
+    return llm
+
+
+def _kickoff_with_retry(crew: Crew) -> str:
+    return str(run_with_llm_retry(crew.kickoff))
 
 
 def _make_llm():
@@ -37,7 +377,7 @@ def _make_llm():
         kwargs["api_key"] = api_key
     if base_url:
         kwargs["base_url"] = base_url
-    return LLM(**kwargs)
+    return _wrap_llm_with_retry(LLM(**kwargs))
 
 
 def _load_skill(name: str) -> str:
@@ -81,6 +421,7 @@ def _make_agents() -> dict[str, Agent]:
     for name, cfg in agent_configs.items():
         agent_kwargs = dict(cfg)
         agent_kwargs["llm"] = llm
+        agent_kwargs.setdefault("max_retry_limit", 0)
         agents[name] = Agent(**agent_kwargs)
 
     required_agents = {"planner", "designer", "frontend", "qa", "revision"}
@@ -114,7 +455,7 @@ def run_planning_stage(brief: str, output_format: OutputFormat = "html_css") -> 
         agent=agents["planner"],
     )
     crew = Crew(agents=[agents["planner"]], tasks=[task], process=Process.sequential, verbose=False)
-    raw_result = str(crew.kickoff())
+    raw_result = _kickoff_with_retry(crew)
     return _extract_json(raw_result)
 
 
@@ -137,7 +478,7 @@ def run_design_stage(page_spec: dict[str, Any], output_format: OutputFormat = "h
         agent=agents["designer"],
     )
     crew = Crew(agents=[agents["designer"]], tasks=[task], process=Process.sequential, verbose=False)
-    raw_result = str(crew.kickoff())
+    raw_result = _kickoff_with_retry(crew)
     return _extract_json(raw_result)
 
 
@@ -169,7 +510,7 @@ def run_frontend_stage(page_spec: dict[str, Any], design_spec: dict[str, Any], o
         agent=agents["frontend"],
     )
     crew = Crew(agents=[agents["frontend"]], tasks=[task], process=Process.sequential, verbose=False)
-    raw_result = str(crew.kickoff())
+    raw_result = _kickoff_with_retry(crew)
     return _extract_code(raw_result, output_format)
 
 
@@ -219,7 +560,7 @@ def run_qa_stage(
         agent=agents["qa"],
     )
     crew = Crew(agents=[agents["qa"]], tasks=[task], process=Process.sequential, verbose=False)
-    raw_result = str(crew.kickoff())
+    raw_result = _kickoff_with_retry(crew)
     return _extract_json(raw_result)
 
 
@@ -255,7 +596,7 @@ def run_revision_plan_stage(
         agent=agents["revision"],
     )
     crew = Crew(agents=[agents["revision"]], tasks=[task], process=Process.sequential, verbose=False)
-    raw_result = str(crew.kickoff())
+    raw_result = _kickoff_with_retry(crew)
     return _extract_json(raw_result)
 
 
@@ -281,7 +622,7 @@ def run_frontend_revision_stage(
         agent=agents["frontend"],
     )
     crew = Crew(agents=[agents["frontend"]], tasks=[task], process=Process.sequential, verbose=False)
-    raw_result = str(crew.kickoff())
+    raw_result = _kickoff_with_retry(crew)
     return _extract_code(raw_result, output_format)
 
 
@@ -305,5 +646,5 @@ def run_frontend_repair_stage(
         agent=agents["frontend"],
     )
     crew = Crew(agents=[agents["frontend"]], tasks=[task], process=Process.sequential, verbose=False)
-    raw_result = str(crew.kickoff())
+    raw_result = _kickoff_with_retry(crew)
     return _extract_code(raw_result, output_format)

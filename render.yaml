@@ -8,6 +8,6 @@ services:
       - key: PYTHON_VERSION
         value: 3.12.7
       - key: MODEL
-        value: gemini/gemini-2.5-flash
+        value: gemini/gemini-3.5-flash-lite
       - key: GEMINI_API_KEY
         sync: false
