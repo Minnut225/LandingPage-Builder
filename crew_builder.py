@@ -177,12 +177,20 @@ def run_qa_stage(
     code: str,
     page_spec: dict[str, Any] | None = None,
     design_spec: dict[str, Any] | None = None,
-    output_format: OutputFormat = "html_css"
+    output_format: OutputFormat = "html_css",
+    revision_request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     agents = _make_agents()
 
     page_spec_str = json.dumps(page_spec, indent=2) if page_spec else "None provided"
     design_spec_str = json.dumps(design_spec, indent=2) if design_spec else "None provided"
+    revision_block = ""
+    if revision_request is not None:
+        revision_block = (
+            f"APPLIED REVISION REQUEST:\n{json.dumps(revision_request, indent=2)}\n"
+            f"Note: If APPLIED REVISION REQUEST adds, updates, or removes sections/items compared to the original "
+            f"PAGE SPECIFICATION, validate against the APPLIED REVISION REQUEST as the authoritative latest requirement.\n\n"
+        )
 
     task = Task(
         description=(
@@ -191,6 +199,7 @@ def run_qa_stage(
             f"Inspect structure, accessibility, responsive sizing, required sections, and lack of fabricated facts.\n"
             f"PAGE SPECIFICATION:\n{page_spec_str}\n\n"
             f"DESIGN SPECIFICATION:\n{design_spec_str}\n\n"
+            f"{revision_block}"
             f"Return a strict JSON object with this exact structure:\n"
             f"{{\n"
             f'  "summary": "High-level summary of review",\n'

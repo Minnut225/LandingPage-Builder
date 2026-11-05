@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Literal
 
+from prompt_synthesizer import synthesize_form_revision_feedback
+
 OutputFormat = Literal["html_css", "react_ts"]
 CheckStatus = Literal["pass", "fail", "not_run"]
 
@@ -363,6 +365,15 @@ class WorkspaceManager:
             dest_code = self.root_dir / code_filename
             shutil.copy2(src_code, dest_code)
 
+        meta_path = v_dir / "metadata.json"
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                if "form_input" in meta:
+                    manifest["form_input"] = meta["form_input"]
+            except Exception:
+                pass
+
         manifest["active_version"] = version_num
         self.save_manifest(manifest)
         return dest_code
@@ -473,7 +484,7 @@ class LandingPageService:
                 design_spec=design_spec,
                 code=code,
                 qa_report=qa_report,
-                metadata={"status": "passed", "created_at": datetime.now().isoformat()}
+                metadata={"status": "passed", "form_input": form_input, "created_at": datetime.now().isoformat()},
             )
             preview_path = self.wm.promote_preview(1)
             manifest = self.wm.get_manifest()
@@ -489,7 +500,7 @@ class LandingPageService:
                 design_spec=design_spec,
                 code=code,
                 qa_report=qa_report,
-                metadata={"status": "qa_failed", "created_at": datetime.now().isoformat()}
+                metadata={"status": "qa_failed", "form_input": form_input, "created_at": datetime.now().isoformat()},
             )
             manifest = self.wm.get_manifest()
             manifest["state"] = "qa_failed"
@@ -498,9 +509,10 @@ class LandingPageService:
 
     def revise_project(
         self,
-        feedback: str,
+        feedback: str = "",
         target_section: str | None = None,
         progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
+        form_input: dict[str, Any] | None = None,
     ) -> VersionResult:
         import crew_builder
 
@@ -516,6 +528,31 @@ class LandingPageService:
         output_format = manifest.get("output_format", "html_css")
         active_v_dir = self.wm.versions_dir / f"v{active_version}"
 
+        old_form_input = manifest.get("form_input")
+        active_meta_path = active_v_dir / "metadata.json"
+        if active_meta_path.exists():
+            try:
+                active_meta = json.loads(active_meta_path.read_text(encoding="utf-8"))
+                if "form_input" in active_meta:
+                    old_form_input = active_meta["form_input"]
+            except Exception:
+                pass
+
+        if form_input is not None:
+            effective_feedback, changed_ids, has_changes = synthesize_form_revision_feedback(
+                old_form_input, form_input, extra_feedback=feedback
+            )
+            if not has_changes:
+                raise ValueError("Không có thay đổi nào trong Properties hoặc nội dung góp ý so với phiên bản hiện tại.")
+            if target_section is None and len(changed_ids) == 1:
+                target_section = changed_ids[0]
+            effective_form_input = form_input
+        else:
+            if not (feedback or "").strip():
+                raise ValueError("Feedback cannot be empty.")
+            effective_feedback = feedback
+            effective_form_input = old_form_input
+
         code_filename = "index.html" if output_format == "html_css" else "App.tsx"
         current_code = (active_v_dir / "code" / code_filename).read_text(encoding="utf-8")
         current_page_spec = json.loads((active_v_dir / "page_spec.json").read_text(encoding="utf-8")) if (active_v_dir / "page_spec.json").exists() else {}
@@ -527,11 +564,11 @@ class LandingPageService:
         manifest["state"] = "revising"
         self.wm.save_manifest(manifest)
         if progress_callback:
-            progress_callback("revising", {"feedback": feedback, "target_version": next_version})
+            progress_callback("revising", {"feedback": effective_feedback, "target_version": next_version})
         revision_request = crew_builder.run_revision_plan_stage(
             current_specs={"page_spec": current_page_spec, "design_spec": current_design_spec},
             current_code=current_code,
-            feedback=feedback,
+            feedback=effective_feedback,
             target_section=target_section,
             output_format=output_format,
         )
@@ -548,7 +585,9 @@ class LandingPageService:
         self.wm.save_manifest(manifest)
         if progress_callback:
             progress_callback("qa_review", {"version_num": next_version})
-        qa_report = crew_builder.run_qa_stage(new_code, current_page_spec, current_design_spec, output_format)
+        qa_report = crew_builder.run_qa_stage(
+            new_code, current_page_spec, current_design_spec, output_format, revision_request=revision_request
+        )
 
         # Strict QA gate with 1 auto-repair attempt
         if not is_qa_passing(qa_report):
@@ -558,7 +597,9 @@ class LandingPageService:
             ]
             try:
                 repaired_code = crew_builder.run_frontend_repair_stage(new_code, failing_checks, output_format)
-                second_qa = crew_builder.run_qa_stage(repaired_code, current_page_spec, current_design_spec, output_format)
+                second_qa = crew_builder.run_qa_stage(
+                    repaired_code, current_page_spec, current_design_spec, output_format, revision_request=revision_request
+                )
                 if is_qa_passing(second_qa):
                     new_code = repaired_code
                     qa_report = second_qa
@@ -574,7 +615,13 @@ class LandingPageService:
                 design_spec=current_design_spec,
                 code=new_code,
                 qa_report=qa_report,
-                metadata={"status": "passed", "source_version": active_version, "feedback": feedback, "created_at": datetime.now().isoformat()},
+                metadata={
+                    "status": "passed",
+                    "source_version": active_version,
+                    "feedback": effective_feedback,
+                    "form_input": effective_form_input,
+                    "created_at": datetime.now().isoformat(),
+                },
                 revision_request=revision_request,
             )
             preview_path = self.wm.promote_preview(next_version)
@@ -591,7 +638,13 @@ class LandingPageService:
                 design_spec=current_design_spec,
                 code=new_code,
                 qa_report=qa_report,
-                metadata={"status": "qa_failed", "source_version": active_version, "feedback": feedback, "created_at": datetime.now().isoformat()},
+                metadata={
+                    "status": "qa_failed",
+                    "source_version": active_version,
+                    "feedback": effective_feedback,
+                    "form_input": effective_form_input,
+                    "created_at": datetime.now().isoformat(),
+                },
                 revision_request=revision_request,
             )
             # Retain current valid preview
@@ -665,7 +718,7 @@ class PreviewServerManager:
     def is_server_ready(self, url: str, timeout_seconds: float = 1.0) -> bool:
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "PreviewChecker/1.0"})
-            with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+            with urllib.request.urlopen(req, timeout_seconds) as resp:
                 return resp.status in (200, 304)
         except Exception:
             return False
@@ -711,4 +764,3 @@ class PreviewServerManager:
                     pass
             finally:
                 self.process = None
-
