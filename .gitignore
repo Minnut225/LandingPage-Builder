@@ -7,4 +7,5 @@ output/site/revisions/
 output/site/node_modules/
 output/site/dist/
 .superpowers/
+.worktrees
 output/
