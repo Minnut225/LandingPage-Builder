@@ -18,6 +18,9 @@
       <span id="session-badge" class="bg-slate-100 text-slate-600 text-xs px-2.5 py-1 rounded-full font-medium border border-slate-200">
         Session: <span id="project-id-display">Chưa tạo</span>
       </span>
+      <button id="btn-new-project" type="button" class="hidden bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-semibold px-2.5 py-1 rounded-full transition flex items-center gap-1" title="Tạo một dự án Landing Page mới từ đầu">
+        <span>+ Dự án mới</span>
+      </button>
       <span id="task-status-badge" class="hidden text-xs px-2.5 py-1 rounded-full font-semibold"></span>
     </div>
 
@@ -39,24 +42,24 @@
   <!-- Main Studio Workspace (2-Column Split) -->
   <main class="flex-1 flex overflow-hidden">
     
-    <!-- LEFT COLUMN: Control & Iteration (420px) -->
+    <!-- LEFT COLUMN: Control & Iteration (440px) -->
     <aside class="w-[440px] border-r border-slate-200 bg-white flex flex-col shrink-0 overflow-y-auto">
       
-      <!-- Section 1: Structured Creation Panel (Collapsible) -->
+      <!-- Section 1: Modular Section & Property Builder Panel (Collapsible) -->
       <div id="creation-panel" class="border-b border-slate-200 bg-white">
         <!-- Header (Click to collapse/expand) -->
         <div id="creation-header" class="flex items-center justify-between p-3.5 bg-slate-50 hover:bg-slate-100 cursor-pointer border-b border-slate-200 transition">
-          <div class="flex items-center gap-2">
-            <span class="text-xs font-bold text-slate-800 uppercase tracking-wide">📋 Thiết lập Landing Page</span>
-            <span id="creation-summary-badge" class="hidden text-[10px] bg-blue-100 text-blue-700 font-semibold px-2 py-0.5 rounded-full"></span>
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="text-xs font-bold text-slate-800 uppercase tracking-wide shrink-0">📋 Thiết lập & Properties</span>
+            <span id="creation-summary-badge" class="hidden text-[10px] bg-blue-100 text-blue-700 font-semibold px-2 py-0.5 rounded-full truncate"></span>
           </div>
-          <button id="btn-toggle-creation" type="button" class="text-xs text-slate-500 font-semibold flex items-center gap-1">
+          <button id="btn-toggle-creation" type="button" class="text-xs text-slate-500 font-semibold flex items-center gap-1 shrink-0">
             <span id="creation-toggle-icon">▼ Thu gọn</span>
           </button>
         </div>
 
         <!-- Form Body -->
-        <div id="creation-body" class="p-4 bg-slate-50/40 space-y-3.5">
+        <div id="creation-body" class="p-3.5 bg-slate-50/40 space-y-3.5">
           <!-- Template Archetype Dropdown -->
           <div>
             <label for="template-select" class="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1.5">Mẫu trang (Archetype)</label>
@@ -88,14 +91,17 @@
             </div>
           </div>
 
-          <!-- Dynamic Form Fields -->
+          <!-- Modular Sections & Property Cards -->
           <div class="pt-2.5 border-t border-slate-200">
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-xs font-bold text-slate-700 uppercase tracking-wide">Nội dung chi tiết</span>
-              <span class="text-[10px] text-slate-400">Trường trống sẽ tự động bỏ qua</span>
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-xs font-bold text-slate-700 uppercase tracking-wide">Modules & Properties</span>
+              <span class="text-[10px] text-slate-400">Bấm + để bật thêm khối</span>
+            </div>
+            <div id="section-picker-bar" class="flex flex-wrap gap-1.5 mb-2.5">
+              <!-- Dynamically populated section pills -->
             </div>
             <div id="dynamic-form-fields" class="space-y-2.5">
-              <!-- Dynamically populated -->
+              <!-- Dynamically populated modular section cards -->
             </div>
           </div>
 
@@ -112,7 +118,7 @@
 
           <!-- Submit Button -->
           <div class="pt-1">
-            <button id="btn-create" class="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-2.5 px-4 rounded-lg transition shadow-sm flex items-center justify-center gap-2">
+            <button id="btn-create" type="button" class="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-2.5 px-4 rounded-lg transition shadow-sm flex items-center justify-center gap-2">
               <span id="btn-create-spinner" class="hidden animate-spin">⟳</span>
               <span id="btn-create-text">Tạo Landing Page</span>
             </button>
@@ -235,7 +241,7 @@
             <div id="preview-placeholder" class="absolute inset-0 bg-white flex flex-col items-center justify-center text-slate-400 p-6 text-center">
               <div class="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-xl text-slate-500 mb-3">⚡</div>
               <h3 class="font-bold text-slate-700 text-sm mb-1">Chưa có bản xem trước</h3>
-              <p class="text-xs max-w-sm text-slate-400">Nhập yêu cầu ở cột bên trái và bấm "Tạo Landing Page" để bắt đầu quy trình tạo trang tự động.</p>
+              <p class="text-xs max-w-sm text-slate-400">Chọn các khối thuộc tính ở cột bên trái và bấm "Tạo Landing Page" để bắt đầu quy trình tạo trang tự động.</p>
             </div>
           </div>
 

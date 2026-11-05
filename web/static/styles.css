@@ -50,3 +50,109 @@
   border-color: #2563eb !important;
   box-shadow: 0 0 0 1px #2563eb;
 }
+
+/* Modular Section Pills & Property Inspector Cards (440px Sidebar) */
+.section-pill-active {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  background-color: #1e293b;
+  color: #ffffff;
+  border: 1px solid #1e293b;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.section-pill-active:hover {
+  background-color: #0f172a;
+}
+
+.section-pill-inactive {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  background-color: #ffffff;
+  color: #475569;
+  border: 1px dashed #cbd5e1;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.section-pill-inactive:hover {
+  border-color: #3b82f6;
+  color: #1d4ed8;
+  background-color: #eff6ff;
+}
+
+.mod-section-card {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  overflow: hidden;
+}
+
+.prop-row-grid {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 500;
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  max-width: 100%;
+}
+
+.tag-suggestion-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 500;
+  background-color: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.tag-suggestion-chip:hover {
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+
+.repeater-item-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  background-color: #f8fafc;
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+}
+.repeater-item-card:hover {
+  border-color: #cbd5e1;
+}
+
+.custom-prop-grid {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+}
