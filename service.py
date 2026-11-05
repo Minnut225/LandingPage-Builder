@@ -535,6 +535,11 @@ class LandingPageService:
                 active_meta = json.loads(active_meta_path.read_text(encoding="utf-8"))
                 if "form_input" in active_meta:
                     old_form_input = active_meta["form_input"]
+                elif active_version == 1 and manifest.get("form_input") is not None:
+                    active_meta["form_input"] = manifest["form_input"]
+                    active_meta_path.write_text(
+                        json.dumps(active_meta, indent=2, ensure_ascii=False), encoding="utf-8"
+                    )
             except Exception:
                 pass
 
@@ -718,7 +723,7 @@ class PreviewServerManager:
     def is_server_ready(self, url: str, timeout_seconds: float = 1.0) -> bool:
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "PreviewChecker/1.0"})
-            with urllib.request.urlopen(req, timeout_seconds) as resp:
+            with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
                 return resp.status in (200, 304)
         except Exception:
             return False

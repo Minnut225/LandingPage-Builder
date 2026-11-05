@@ -121,6 +121,7 @@ def _canonicalize_sections(
                 raw_items = []
             title_field = sec_schema.get("item_title_field", "name")
             valid_items: list[dict[str, Any]] = []
+            seen_item_ids: set[str] = set()
 
             for idx, item in enumerate(raw_items, start=1):
                 if not isinstance(item, dict):
@@ -156,7 +157,13 @@ def _canonicalize_sections(
                 if not item_title:
                     item_title = item_props[0][2] if item_props else f"Mục #{len(valid_items) + 1}"
 
-                item_id = str(item.get("id") or f"{sec_id}_{idx}").strip()
+                base_id = str(item.get("id") or f"{sec_id}_{idx}").strip()
+                item_id = base_id
+                dup_idx = idx
+                while item_id in seen_item_ids:
+                    item_id = f"{base_id}_{dup_idx}"
+                    dup_idx += 1
+                seen_item_ids.add(item_id)
                 valid_items.append(
                     {
                         "id": item_id,

@@ -152,3 +152,65 @@ def test_run_qa_stage_injects_revision_request_context(mock_crew_cls, mock_task_
     task_desc = mock_task_cls.call_args.kwargs["description"]
     assert "APPLIED REVISION REQUEST" in task_desc
     assert "Remove AI Doc Assistant" in task_desc
+
+
+
+@patch("crew_builder.run_revision_plan_stage")
+@patch("crew_builder.run_frontend_revision_stage")
+@patch("crew_builder.run_qa_stage")
+def test_legacy_v1_without_metadata_form_input_preserves_v1_on_rollback(
+    mock_qa, mock_front_rev, mock_rev_plan, tmp_path: Path
+):
+    service = LandingPageService(tmp_path / "proj_legacy_v1")
+    v1_input = _make_portfolio_form_input(["Legacy V1 Project"])
+    v2_input = _make_portfolio_form_input(["Legacy V1 Project", "New V2 Project"])
+
+    # Pre-PR v1 project: form_input exists ONLY in manifest.json, NOT in v1/metadata.json
+    wm = service.wm
+    wm.init_manifest("Initial brief", "html_css", form_input=v1_input)
+    wm.save_version_artifacts(
+        version_num=1,
+        page_spec={"project_title": "Portfolio"},
+        design_spec={"visual_direction": "Clean"},
+        code="<!doctype html><html><body>v1</body></html>",
+        qa_report={"checks": [{"id": "c1", "status": "pass"}]},
+        metadata={"status": "passed"},  # No form_input key in v1/metadata.json!
+    )
+    wm.promote_preview(1)
+
+    mock_rev_plan.return_value = {"source_version": 1, "requested_changes": "Add New V2 Project"}
+    mock_front_rev.return_value = "<!doctype html><html><body>v2</body></html>"
+    mock_qa.return_value = {"summary": "v2 OK", "checks": [{"id": "c1", "status": "pass"}]}
+
+    res2 = service.revise_project(feedback="", form_input=v2_input)
+    assert res2.version_num == 2
+    assert service.get_manifest()["form_input"] == v2_input
+
+    # Rollback to v1 MUST restore v1_input rather than leaving v2_input stuck in manifest
+    service.rollback_to_version(1)
+    assert service.get_manifest()["active_version"] == 1
+    assert service.get_manifest()["form_input"] == v1_input
+
+
+@patch("crew_builder._make_agents")
+@patch("crew_builder.Task")
+@patch("crew_builder.Crew")
+def test_run_qa_stage_mentions_design_specification_override(mock_crew_cls, mock_task_cls, mock_make_agents):
+    mock_make_agents.return_value = {"qa": MagicMock()}
+    mock_crew_inst = MagicMock()
+    mock_crew_inst.kickoff.return_value = '{"summary": "OK", "checks": [{"id": "content", "status": "pass"}]}'
+    mock_crew_cls.return_value = mock_crew_inst
+
+    crew_builder.run_qa_stage(
+        "<!doctype html><html><body>Code</body></html>",
+        page_spec={"project_title": "Old Spec"},
+        design_spec={"style": "modern_clean"},
+        output_format="html_css",
+        revision_request={"requested_changes": "Switch style to tech_dark"},
+    )
+    task_desc = mock_task_cls.call_args.kwargs["description"]
+    assert "PAGE SPECIFICATION" in task_desc
+    assert "DESIGN SPECIFICATION" in task_desc
+    # Specifically inside the APPLIED REVISION REQUEST override note:
+    rev_note = task_desc.split("APPLIED REVISION REQUEST:")[1]
+    assert "DESIGN SPECIFICATION" in rev_note

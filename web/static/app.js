@@ -89,7 +89,32 @@
   const cfgProvider = document.getElementById("cfg-provider");
   const cfgApiKey = document.getElementById("cfg-api-key");
 
+  function bumpItemUidFromId(rawId) {
+    const m = /(\d+)$/.exec(String(rawId || ""));
+    if (m) {
+      itemUidCounter = Math.max(itemUidCounter, Number(m[1]) + 1);
+    }
+  }
+
+  function collectExistingItemIds() {
+    const used = new Set();
+    Object.values(sectionStateByTemplate || {}).forEach((tplMap) => {
+      Object.values(tplMap || {}).forEach((secState) => {
+        if (secState && Array.isArray(secState.items)) {
+          secState.items.forEach((it) => {
+            if (it && it.id) used.add(String(it.id));
+          });
+        }
+      });
+    });
+    return used;
+  }
+
   function nextItemId() {
+    const used = collectExistingItemIds();
+    while (used.has(`item_${itemUidCounter}`)) {
+      itemUidCounter += 1;
+    }
     const id = `item_${itemUidCounter}`;
     itemUidCounter += 1;
     return id;
@@ -674,7 +699,7 @@
         keyInp.type = "text";
         keyInp.placeholder = "Thuộc tính...";
         keyInp.value = pair.key || "";
-        keyInp.className = "text-[11px] p-1.5 bg-white border border-slate-300 rounded-md text-slate-700 font-medium placeholder-slate-400 focus:ring-1 focus:ring-blue-500 focus:outline-none";
+        keyInp.className = "w-full min-w-0 text-[11px] p-1.5 bg-white border border-slate-300 rounded-md text-slate-700 font-medium placeholder-slate-400 focus:ring-1 focus:ring-blue-500 focus:outline-none";
         keyInp.addEventListener("input", () => {
           pair.key = keyInp.value;
           updatePromptPreviewIfOpen();
@@ -684,7 +709,7 @@
         valInp.type = "text";
         valInp.placeholder = "Giá trị...";
         valInp.value = pair.value || "";
-        valInp.className = "text-[11px] p-1.5 bg-white border border-slate-300 rounded-md text-slate-800 placeholder-slate-400 focus:ring-1 focus:ring-blue-500 focus:outline-none";
+        valInp.className = "w-full min-w-0 text-[11px] p-1.5 bg-white border border-slate-300 rounded-md text-slate-800 placeholder-slate-400 focus:ring-1 focus:ring-blue-500 focus:outline-none";
         valInp.addEventListener("input", () => {
           pair.value = valInp.value;
           updatePromptPreviewIfOpen();
@@ -1170,14 +1195,21 @@
               : [];
           } else if (sec.kind === "repeater") {
             const items = Array.isArray(incomingSec.items) ? incomingSec.items : [];
+            const seenHydratedIds = new Set();
             target.items = items.map((it) => {
               const vals = {};
               const srcVals = it.values || {};
               (sec.properties || []).forEach((p) => {
                 vals[p.name] = p.type === "tags" ? normalizeTagTokens(srcVals[p.name]) : String(srcVals[p.name] || "");
               });
+              let resolvedId = it.id ? String(it.id).trim() : "";
+              if (!resolvedId || seenHydratedIds.has(resolvedId)) {
+                resolvedId = nextItemId();
+              }
+              seenHydratedIds.add(resolvedId);
+              bumpItemUidFromId(resolvedId);
               return {
-                id: it.id || nextItemId(),
+                id: resolvedId,
                 expanded: false,
                 values: vals,
                 custom_properties: Array.isArray(it.custom_properties)
@@ -1210,6 +1242,10 @@
               target.values.email = String(rawFormData.contact_info);
               hasAny = true;
             }
+            if (sec.id === "tuition" && rawFormData.tuition && !target.values.price) {
+              target.values.price = String(rawFormData.tuition);
+              hasAny = true;
+            }
             if (hasAny) target.enabled = true;
           } else if (sec.kind === "tags") {
             if (rawFormData[sec.id]) {
@@ -1231,7 +1267,27 @@
               target.items = lines.map((line) => {
                 const colonIdx = line.indexOf(":");
                 const vals = {};
-                if (colonIdx > 0 && descProp) {
+                if (sec.id === "pricing") {
+                  if (colonIdx > 0) {
+                    vals.plan_name = line.slice(0, colonIdx).trim();
+                    vals.price = line.slice(colonIdx + 1).trim() || line.slice(0, colonIdx).trim();
+                  } else {
+                    vals.plan_name = line;
+                    vals.price = line;
+                  }
+                } else if (sec.id === "testimonials") {
+                  const dashMatch = /^(.+?)\s+[-–—]\s+(.+)$/.exec(line);
+                  if (dashMatch) {
+                    vals.quote = dashMatch[1].replace(/^[“"']+|[”"']+$/g, "").trim() || line;
+                    vals.author = dashMatch[2].trim() || "Khách hàng";
+                  } else if (colonIdx > 0) {
+                    vals.author = line.slice(0, colonIdx).trim();
+                    vals.quote = line.slice(colonIdx + 1).trim() || line;
+                  } else {
+                    vals.quote = line;
+                    vals.author = "Khách hàng";
+                  }
+                } else if (colonIdx > 0 && descProp) {
                   vals[titleField] = line.slice(0, colonIdx).trim();
                   vals[descProp.name] = line.slice(colonIdx + 1).trim();
                 } else {
@@ -1437,7 +1493,7 @@
     versionsList = [];
     versionFormInputs = {};
     sectionStateByTemplate = {};
-    isBusyGenerating = false;
+    setGeneratingState(false);
 
     projectIdDisplay.textContent = "Chưa tạo";
     if (taskStatusBadge) taskStatusBadge.classList.add("hidden");

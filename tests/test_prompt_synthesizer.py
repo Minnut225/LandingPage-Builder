@@ -183,3 +183,43 @@ def test_synthesize_form_revision_noop_and_legacy_flat_upgrade():
     fb_up, changed_up, ok_up = synthesize_form_revision_feedback(legacy_old, sample)
     assert ok_up is True
     assert "Minh" in fb_up
+
+
+
+def test_duplicate_repeater_item_ids_are_disambiguated_in_revision_diff():
+    old_input = {
+        "template_id": "personal_portfolio",
+        "style": "modern_clean",
+        "form_data": {
+            "sections": {
+                "about_me": {"enabled": True, "values": {"full_name": "Minh", "title": "AI Dev", "bio": "Bio"}},
+                "projects": {
+                    "enabled": True,
+                    "items": [{"id": "item_1", "values": {"name": "AI Doc Assistant", "role": "Lead"}}],
+                },
+            }
+        },
+    }
+    # Simulate colliding item_1 IDs in client payload
+    new_input = {
+        "template_id": "personal_portfolio",
+        "style": "modern_clean",
+        "form_data": {
+            "sections": {
+                "about_me": {"enabled": True, "values": {"full_name": "Minh", "title": "AI Dev", "bio": "Bio"}},
+                "projects": {
+                    "enabled": True,
+                    "items": [
+                        {"id": "item_1", "values": {"name": "AI Doc Assistant", "role": "Lead"}},
+                        {"id": "item_1", "values": {"name": "LandingPage Builder", "role": "Architect"}},
+                    ],
+                },
+            }
+        },
+    }
+    diff_md, changed_ids, has_changes = synthesize_form_revision_feedback(old_input, new_input)
+    assert has_changes is True
+    assert "projects" in changed_ids
+    assert "[Thêm mục mới]" in diff_md
+    assert "LandingPage Builder" in diff_md
+    assert "Sửa 'AI Doc Assistant'" not in diff_md

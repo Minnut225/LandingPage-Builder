@@ -198,6 +198,8 @@ def create_app(base_dir: Path | None = None) -> FastAPI:
                         version_form_inputs[str(v)] = meta["form_input"]
                 except Exception:
                     pass
+        if active_v == 1 and "1" not in version_form_inputs and manifest.get("form_input") is not None:
+            version_form_inputs["1"] = manifest["form_input"]
 
         return {
             "project_id": project_id,

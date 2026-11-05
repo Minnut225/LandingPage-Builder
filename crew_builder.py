@@ -188,8 +188,8 @@ def run_qa_stage(
     if revision_request is not None:
         revision_block = (
             f"APPLIED REVISION REQUEST:\n{json.dumps(revision_request, indent=2)}\n"
-            f"Note: If APPLIED REVISION REQUEST adds, updates, or removes sections/items compared to the original "
-            f"PAGE SPECIFICATION, validate against the APPLIED REVISION REQUEST as the authoritative latest requirement.\n\n"
+            f"Note: If APPLIED REVISION REQUEST adds, updates, or removes sections/items or styles/palettes compared to the original "
+            f"PAGE SPECIFICATION or DESIGN SPECIFICATION, validate against the APPLIED REVISION REQUEST as the authoritative latest requirement.\n\n"
         )
 
     task = Task(

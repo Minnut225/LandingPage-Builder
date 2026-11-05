@@ -1,4 +1,5 @@
 import unittest
+import urllib.request
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 import shutil
@@ -36,6 +37,18 @@ class TestPreviewServerManager(unittest.TestCase):
         mock_urlopen.return_value.__enter__.return_value = mock_resp
         pm = PreviewServerManager(self.test_dir, port=5173)
         self.assertTrue(pm.is_server_ready("http://localhost:5173"))
+
+    @patch.object(urllib.request.OpenerDirector, "open")
+    def test_is_server_ready_passes_timeout_as_keyword_not_post_data(self, mock_open):
+        mock_resp = MagicMock(status=200)
+        mock_resp.__enter__.return_value = mock_resp
+        mock_open.return_value = mock_resp
+        pm = PreviewServerManager(self.test_dir, port=5173)
+        self.assertTrue(pm.is_server_ready("http://localhost:5173", timeout_seconds=0.5))
+        called_req, called_data, called_timeout = mock_open.call_args.args
+        self.assertIsNone(called_req.data)
+        self.assertIsNone(called_data)
+        self.assertEqual(called_timeout, 0.5)
 
     @patch("urllib.request.urlopen", side_effect=Exception("Connection refused"))
     def test_is_server_ready_failure(self, mock_urlopen):
